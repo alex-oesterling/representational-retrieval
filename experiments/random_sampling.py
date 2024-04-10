@@ -48,7 +48,7 @@ def main():
     total = 0
     for _, labels in tqdm(dataloader):
         for index, function in enumerate(functions):
-            expected_function_values[index] = torch.sum(labels[:, list(function)])
+            expected_function_values[index] = torch.linalg.norm(labels[:, list(function)].float())
         total += labels.shape[0]
     expected_function_values /= total
 
