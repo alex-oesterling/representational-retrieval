@@ -85,10 +85,73 @@ class CVXPY():
         return representation, similarity, sparsity
     
 ## @Carol: Please implement MMR here! ideally taking in your label matrix, similarity vector, and a lambda, get the set of retrieved vectors and then return the representation cost and the similarity score.
+# MMR algorithm defined in PATHS using CLIP embedding
 class MMR():
-    def __init__(self):
-        return
+    def __init__(self, similarity_scores, labels, lambda_, features):
+        m = similarity_scores.shape[0]
+        d = labels.shape[1]
+        lambda_ = lambda_ # trade-off parameter
+        self.a = np.zeros(m)
+        self.similarity_scores = similarity_scores
+        # define what embedding to use for the diversity metric.
+        # None (img itself), CLIP, or CLIP+PCA
+        self.embeddings = features # the entire dataset (also used for retrieval), or a separate curation set
+        self.mean_embedding = None
+        self.std_embedding = None
 
+    def fit(self, k):
+        if self.mean_embedding is None or self.std_embedding is None:
+            self.statEmbedding()
+
+        for i in range(k):
+            MMR_temp = np.zeros(len(self.embeddings))
+            for j in range(len(self.embeddings)):
+                if self.a[j] == 1:
+                    continue
+                # temporary select the jth element
+                self.a[j] = 1
+                MMR_temp[j] = (1-self.lambda_)* self.similarity_scores.T @ self.a + self.lambda_ * self.marginal_diversity_score(j)
+                self.a[j] = 0
+            # select the element with the highest MMR 
+            self.a[np.argmax(MMR_temp)] = 1
+        diversity_cost = self.marginal_diversity_score()
+        similarity_cost = self.similarity_scores.T @ self.a
+        return diversity_cost, similarity_cost
+    
+    def statEmbedding(self):
+        distances = []
+        for i in range(len(self.embeddings)):
+            for j in range(i+1, len(self.embeddings)):
+                distance = np.linalg.norm(self.embeddings[i] - self.embeddings[j])
+                distances.append(distance)
+        distances = np.array(distances)
+        self.mean_embedding = np.mean(distances)
+        self.std_embedding = np.std(distances)
+
+
+    def marginal_diversity_score(self, addition_index=None):
+        # compute the diversity score of the entire set
+        if addition_index is None:
+            marginal_diversity = 0
+            subset = self.embeddings[self.a==1]
+            for i in range(len(subset)):
+                for j in range(i+1, len(subset)):
+                    marginal_diversity += (np.linalg.norm(subset[i] - subset[j])-self.mean_embedding)/self.std_embedding
+            marginal_diversity /= len(subset)
+
+        # compute the diversity score of an additional item
+        else:
+            # compute the diversity score of adding the addition_index to the current set
+            marginal_diversity = 0
+            self.a[addition_index] = 0
+            subset = self.embeddings[self.a==1]
+            for i in range(len(subset)):
+                marginal_diversity += (np.linalg.norm(self.embeddings[addition_index] - subset[i])-self.mean_embedding)/self.std_embedding
+            marginal_diversity /= len(subset)
+        return marginal_diversity
+        
+
+# minimize MSE of a regression problem
 class GreedyOracle():
     def __init__(self, similarity_scores, labels):
         self.m = similarity_scores.shape[0]
