@@ -1,7 +1,13 @@
 import numpy as np
 import cvxpy as cp
 from sklearn.linear_model import LinearRegression
-from copy import deepcopy
+
+def sup_function(indices, dataset, model=LinearRegression):
+    m = dataset.shape[0]
+    k = int(np.sum(indices))
+    alpha = (indices/k - 1/m)
+    reg = model().fit(dataset, alpha)
+    return reg.predict(dataset)
 
 class CVXPY():
     def __init__(self, similarity_scores, labels):
@@ -106,18 +112,29 @@ class GreedyOracle():
         print(np.sum((1/k)*self.a.value-(1/self.m)))
 
 
-        reps = []
-        sims = []
+        # reps = []
+        # sims = []
         for _ in range(num_iter):
             c = self.sup_function(self.a.value, k)
+            if np.sum((1/k)*self.a.value*c-(1/self.m)*c) < rho:
+                print("constraints satisfied, exiting early")
+                break
             # print(lam, flush=True)
             # c = lam*reg.predict(self.C)
             self.max_similarity(c, k, rho)
-            reps.append(np.sum((1/k)*self.a.value*c-(1/self.m)*c))
-            sims.append(self.a.value.T@self.similarity_scores)
-            # cvals.append(c(self.C))
-            # sims.append(self.a.value@self.similarity_scores)
-        return self.a.value, reps, sims
+
+        rep = np.sum((1/k)*self.a.value*c-(1/self.m)*c)
+        sim = self.a.value.T@self.similarity_scores
+
+        sparsity = sum(self.a.value>1e-4)
+        at = self.a.value
+        at[np.argsort(at)[::-1][k:]] = 0
+        at[at>1e-5] = 1.0 
+
+        rounded_rep = np.sum((1/k)*at*c-(1/self.m)*c)
+        rounded_sim = at.T@self.similarity_scores
+
+        return self.a.value, rep, sim#, rounded_rep, rounded_sim, sparsity
 
 
     def max_similarity(self, c, k, rho):
@@ -130,9 +147,4 @@ class GreedyOracle():
     def sup_function(self, a, k):
         alpha = (a/k - 1/self.m)
         reg = LinearRegression().fit(self.C, alpha)
-
-        lam = np.inner(reg.predict(self.C), alpha)/np.linalg.norm(reg.predict(self.C))
-
-        print(lam)
-
-        return lam*reg.predict(self.C)
+        return reg.predict(self.C)
