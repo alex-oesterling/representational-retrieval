@@ -2,7 +2,7 @@ import numpy as np
 import cvxpy as cp
 from sklearn.linear_model import LinearRegression
 
-def sup_function(indices, dataset, model=LinearRegression):
+def oracle_function(indices, dataset, model=LinearRegression):
     m = dataset.shape[0]
     k = int(np.sum(indices))
     alpha = (indices/k - 1/m)
