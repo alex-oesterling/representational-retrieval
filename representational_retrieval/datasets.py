@@ -5,14 +5,12 @@ from PIL import Image
 import os
 
 class CelebA(torch.utils.data.Dataset):
-    def __init__(self, path, attributes = ['Male', 'Eyeglasses'], train=True, transform=torchvision.transforms.ToTensor()):
+    def __init__(self, path, attributes = None, train=True, transform=torchvision.transforms.ToTensor()):
         self.filepath = os.path.join(path, "celeba/")
 
         self.transform = transform
         self.img_paths = []
         self.labels = []
-
-        self.attributes = attributes
 
         self.attr_to_idx = {
             '5_o_Clock_Shadow': 1, 
@@ -56,6 +54,9 @@ class CelebA(torch.utils.data.Dataset):
             'Wearing_Necktie': 39, 
             'Young': 40, 
         }
+
+        if attributes is None:
+            attributes = self.attr_to_idx.keys()
 
         attr_indices = [self.attr_to_idx[attr] for attr in attributes]
 
