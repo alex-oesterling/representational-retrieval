@@ -65,20 +65,30 @@ def main():
     reps = []
     sims = []
     indices_list = []
+    selection_list = []
+    MMR_cost_list = []
     for p in tqdm(pvals):
-        indices, diversity_cost, similarity_cost = solver.fit(args.k, p) 
-        weighting_vector = oracle_function(indices, labels, model=LinearRegression)
+        indices, diversity_cost, selection = solver.fit(args.k, p) 
+        # c(x)
+        weighting_clf = oracle_function(indices, labels, model=LinearRegression)
+        # c(x) evaluated on data points and normalized
+        weighting_vector  = weighting_clf.predict(labels)
+        weighting_vector/= np.linalg.norm(weighting_vector)
         rep = np.sum((1/args.k)*indices* weighting_vector -(1/m)*weighting_vector) # weighting_vector is c
         sim = (s.T @ indices)
         reps.append(rep)
         sims.append(sim)
         indices_list.append(indices)
+        selection_list.append(selection)
+        MMR_cost_list.append(diversity_cost)
 
     results = {}
-    results['reps'] = reps
+    results['MPR'] = reps
     results['sims'] = sims
     results['indices'] = indices_list
     results['pvals'] = pvals
+    results['selection'] = selection_list
+    results['MMR_cost'] = MMR_cost_list
     result_path = '../results/'
     filename_pkl = "mmr_rep_sim.pkl"
     if not os.path.exists(result_path):
