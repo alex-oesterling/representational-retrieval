@@ -9,6 +9,8 @@ import clip
 from torch.utils.data import DataLoader
 sns.set_style("whitegrid")
 
+import sklearn
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-device', default="cuda", type=str)
@@ -105,7 +107,7 @@ def main():
     # plt.ylabel('Sparsity')
     # plt.savefig("./results/linear_rep_spar.png")
 
-    solver = GreedyOracle(s, labels)
+    solver = GreedyOracle(s, labels, model = sklearn.ensemble.RandomForestRegressor)
 
     reps_final = []
     sims_final = []
@@ -141,7 +143,7 @@ def main():
     print("Rep lower bound:", rep_upper_bound)
 
     plt.figure()
-    plt.title("Oracle, Linear Regression, CelebA")
+    plt.title("Oracle, RF Regression, CelebA")
     plt.plot(rounded_reps_final, rounded_sims_final, label="Binary")
     plt.plot(reps_final,sims_final, label="Relaxed")
     plt.axhline(y=sim_upper_bound, color='b', linestyle=':', label="Similarity Upper Bound")
@@ -149,12 +151,12 @@ def main():
     plt.xlabel('Representation')
     plt.ylabel('Similarity')
     plt.legend()
-    plt.savefig("./results/greedy2_rep_sim.png")
+    plt.savefig("./results/greedy_rf_rep_sim.png")
 
     plt.figure()
     plt.plot(reps_final, sparsities)
     plt.xlabel('Representation')
     plt.ylabel('Sparsity')
-    plt.savefig("./results/greedy_rep_spar.png")
+    plt.savefig("./results/greedy_rf_rep_spar.png")
 if __name__ == "__main__":
     main()
