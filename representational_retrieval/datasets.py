@@ -3,6 +3,7 @@ import torch
 import torchvision
 from PIL import Image
 import os
+import pandas as pd
 
 class CelebA(torch.utils.data.Dataset):
     def __init__(self, path, attributes = None, train=True, transform=torchvision.transforms.ToTensor()):
@@ -99,3 +100,83 @@ class CelebA(torch.utils.data.Dataset):
         label = self.labels[idx]
 
         return self.transform(image), label
+    
+class Occupations(torch.utils.data.Dataset):
+    def __init__(self, path, transform=torchvision.transforms.ToTensor()):
+        self.filepath = os.path.join(path, "occupations/")
+
+        self.transform = transform
+        self.images = []
+        self.labels = []
+
+        df = pd.read_csv(self.filepath + "gender_labelled_images.csv")
+        self.labels = df.image_gender
+
+        construct_path = lambda x, y: os.path.join(self.filepath, "google", str(x), str(y)+".jpg")
+        img_paths = [construct_path(*x) for x in tuple(zip(df['search_term'], df['order']))]
+
+        for path in img_paths:
+            self.images.append(self.transform(Image.open(path)))
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        return self.images[idx], self.labels[idx]
+    
+class FairFace(torch.utils.data.Dataset):
+    def __init__(self, path, train=True, transform=torchvision.transforms.ToTensor()):
+        self.filepath = os.path.join(path, "fairface/")
+
+        self.transform = transform
+        # self.images = []
+        self.image_paths = []
+        self.labels = []
+
+        if train:
+            df = pd.read_csv(self.filepath + "fairface_label_train.csv")
+        else:
+            df = pd.read_csv(self.filepath + "fairface_label_val.csv")
+
+        self.labels = [list(x) for x in list(zip(df.gender, df.race, df.age))]
+
+        construct_path = lambda x: os.path.join(self.filepath, x)
+        self.img_paths = [construct_path(x) for x in df.file]
+
+        ## For speed can preload data, but too large to fit on GPU in general
+        # for path in self.img_paths:
+        #     self.images.append(self.transform(Image.open(path)))
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        return self.transform(Image.open(self.img_paths[idx])), self.labels[idx]
+    
+class UTKFace(torch.utils.data.Dataset):
+    def __init__(self, path, train=True, transform=torchvision.transforms.ToTensor()):
+        # self.filepath = os.path.join(path, "fairface/")
+
+        # self.transform = transform
+        # self.images = []
+        # self.labels = []
+
+        # if train:
+        #     df = pd.read_csv(self.filepath + "fairface_label_train.csv")
+        # else:
+        #     df = pd.read_csv(self.filepath + "fairface_label_val.csv")
+
+        # self.labels = [list(x) for x in list(zip(df.gender, df.race, df.age))]
+
+        # construct_path = lambda x: os.path.join(self.filepath, x)
+        # img_paths = [construct_path(x) for x in df.file]
+
+        # for path in img_paths:
+        #     self.images.append(self.transform(Image.open(path)))
+        return
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        return self.images[idx], self.labels[idx]

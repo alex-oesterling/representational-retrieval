@@ -10,9 +10,6 @@ import clip
 from torch.utils.data import DataLoader
 sns.set_style("whitegrid")
 
-def mmr():
-    return
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-device', default="cuda", type=str)
@@ -46,7 +43,7 @@ def main():
 
     q = 'A photo of a Professor.'
 
-    q_token = clip.tokenize(q).to(args.device)
+    q_token = clip.tokenize(q).to(args.device) 
     with torch.no_grad():
         q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
     q_emb = q_emb/np.linalg.norm(q_emb)
@@ -57,6 +54,12 @@ def main():
     # compute similarities
     s = features @ q_emb.T
 
+    top_indices = np.zeros(m)
+    top_indices[np.argsort(s.squeeze())[::-1][:args.k]] = 1
+    sim_upper_bound = s.T@top_indices
+    print(sim_upper_bound, flush=True)
+
+    # solver = CVXPY(s, labels)
     # solver = CVXPY(s, labels)
 
     # lower, upper = solver.get_lower_upper_bounds(args.k)
@@ -71,40 +74,88 @@ def main():
     # for p in tqdm(pvals):
     #     indices = solver.fit(args.k, p)
     #     # rep, sim = solver.fit(args.k, p)
-    #     rep = np.sqrt(np.sum(np.power((labels.T @ indices)/args.k - (labels.T@np.ones(m))/m, 2)))
-    #     sim = (s.T @ indices)
-    #     reps.append(rep)
-    #     sims.append(sim)
+    #     rep = solver.get_representation(indices, args.k)
+    #     sim = solver.get_similarity(indices)
 
-    # for p in tqdm(pvals):
-    #     indices, spar = solver.fit_select(args.k, p)
-    #     rep = np.sqrt(np.sum(np.power((labels.T @ indices)/args.k - (labels.T@np.ones(m))/m, 2)))
-    #     sim = (s.T @ indices)
+    #     sparsity = sum(indices>1e-4)
+    #     indices_rounded = indices
+    #     indices_rounded[np.argsort(indices_rounded)[::-1][args.k:]] = 0
+    #     indices_rounded[indices_rounded>1e-5] = 1.0 
+
+    #     rounded_rep = solver.get_representation(indices_rounded, args.k)
+    #     rounded_sim = solver.get_similarity(indices_rounded)
+
+    #     reps.append(rounded_rep)
+    #     sims.append(rounded_sim)
     #     relaxed_reps.append(rep)
     #     relaxed_sims.append(sim)
-    #     spars.append(spar)
+    #     spars.append(sparsity)
 
     # plt.figure()
     # plt.plot(reps, sims, label="Binary")
     # plt.plot(relaxed_reps,relaxed_sims, label="Relaxed")
+    # plt.axhline(y=sim_upper_bound, color='b', linestyle=':')
     # plt.xlabel('Representation')
     # plt.ylabel('Similarity')
-    # plt.savefig("./results/rep_sim.png")
+    # plt.legend()
+    # plt.savefig("./results/linear_rep_sim.png")
 
     # plt.figure()
     # plt.plot(reps, spars)
     # plt.xlabel('Representation')
     # plt.ylabel('Sparsity')
-    # plt.savefig("./results/rep_spar.png")
+    # plt.savefig("./results/linear_rep_spar.png")
 
     solver = GreedyOracle(s, labels)
 
-    final, reps, sims = solver.fit(10, 100, 1e-6)
+    reps_final = []
+    sims_final = []
+    rounded_reps_final = []
+    rounded_sims_final = []
+    sparsities = []
+    for rho in np.logspace(-6, 0.5, 50):
+        indices = solver.fit(args.k, 10, rho)
+        sparsity = sum(indices>1e-4)
+        indices_rounded = indices.copy()
+        indices_rounded[np.argsort(indices_rounded)[::-1][args.k:]] = 0
+        indices_rounded[indices_rounded>1e-5] = 1.0 
+
+        print(np.sort(indices)[::-1], flush=True)
+        print(np.sort(indices_rounded)[::-1], flush=True)
+        print(np.linalg.norm(indices-indices_rounded), flush=True)
+
+        rep = solver.get_representation(indices, args.k)
+        sim = solver.get_similarity(indices)
+
+        rounded_rep = solver.get_representation(indices_rounded, args.k)
+        rounded_sim = solver.get_similarity(indices_rounded)
+
+        reps_final.append(rep)
+        sims_final.append(sim)
+        rounded_reps_final.append(rounded_rep)
+        rounded_sims_final.append(rounded_sim)
+        sparsities.append(sparsity)
+
+    rep_upper_bound = solver.get_representation(top_indices, args.k)
+
+    print("Sim upper bound:", sim_upper_bound)
+    print("Rep lower bound:", rep_upper_bound)
 
     plt.figure()
-    plt.plot(reps, sims, label="Binary")
+    plt.title("Oracle, Linear Regression, CelebA")
+    plt.plot(rounded_reps_final, rounded_sims_final, label="Binary")
+    plt.plot(reps_final,sims_final, label="Relaxed")
+    plt.axhline(y=sim_upper_bound, color='b', linestyle=':', label="Similarity Upper Bound")
+    plt.axvline(x=rep_upper_bound, color='r', linestyle=':', label="Representation Lower Bound")
     plt.xlabel('Representation')
     plt.ylabel('Similarity')
-    plt.savefig("./results/greedy_rep_sim.png")
+    plt.legend()
+    plt.savefig("./results/greedy2_rep_sim.png")
+
+    plt.figure()
+    plt.plot(reps_final, sparsities)
+    plt.xlabel('Representation')
+    plt.ylabel('Sparsity')
+    plt.savefig("./results/greedy_rep_spar.png")
 if __name__ == "__main__":
     main()

@@ -7,7 +7,7 @@ def oracle_function(indices, dataset, model=LinearRegression):
     k = int(np.sum(indices))
     alpha = (indices/k - 1/m)
     reg = model().fit(dataset, alpha)
-    return reg.predict(dataset)
+    return reg
 
 class CVXPY():
     def __init__(self, similarity_scores, labels):
@@ -83,6 +83,14 @@ class CVXPY():
         return at, sparsity
 
         return representation, similarity, sparsity
+    
+    def get_representation(self, indices, k):
+        rep = np.sqrt(np.sum(np.power((self.C.T @ indices)/k - self.cbar, 2)))
+        return rep
+    
+    def get_similarity(self, indices):
+        sim = self.similarity_scores.T @ indices
+        return sim
     
 ## @Carol: Please implement MMR here! ideally taking in your label matrix, similarity vector, and a lambda, get the set of retrieved vectors and then return the representation cost and the similarity score.
 # MMR algorithm defined in PATHS using CLIP embedding
@@ -163,7 +171,6 @@ class GreedyOracle():
         self.C = labels
 
         self.similarity_scores = similarity_scores
-        self.labels=labels
 
     def fit(self, k, num_iter, rho):
         self.objective = cp.Maximize(self.similarity_scores.T @ self.a)
@@ -171,38 +178,26 @@ class GreedyOracle():
         self.prob = cp.Problem(self.objective, self.constraints)
         self.prob.solve(solver=cp.ECOS,warm_start=True)
 
-        print(self.a.value)
-        print(np.sum((1/k)*self.a.value-(1/self.m)))
+        print(self.a.value, flush=True)
+        print(np.sum((1/k)*self.a.value-(1/self.m)), flush=True)
 
 
         # reps = []
         # sims = []
         for _ in range(num_iter):
-            c = self.sup_function(self.a.value, k)
+            reg = self.sup_function(self.a.value, k)
+            c = reg.predict(self.C)
             if np.sum((1/k)*self.a.value*c-(1/self.m)*c) < rho:
                 print("constraints satisfied, exiting early")
+                print(np.sum((1/k)*self.a.value*c-(1/self.m)*c))
+                print(rho)
                 break
-            # print(lam, flush=True)
-            # c = lam*reg.predict(self.C)
             self.max_similarity(c, k, rho)
 
-        rep = np.sum((1/k)*self.a.value*c-(1/self.m)*c)
-        sim = self.a.value.T@self.similarity_scores
-
-        sparsity = sum(self.a.value>1e-4)
-        at = self.a.value
-        at[np.argsort(at)[::-1][k:]] = 0
-        at[at>1e-5] = 1.0 
-
-        rounded_rep = np.sum((1/k)*at*c-(1/self.m)*c)
-        rounded_sim = at.T@self.similarity_scores
-
-        return self.a.value, rep, sim#, rounded_rep, rounded_sim, sparsity
+        return self.a.value
 
 
     def max_similarity(self, c, k, rho):
-        print(rho)
-        print(np.sum((1/k)*self.a.value*c-(1/self.m)*c), flush=True)
         self.constraints.append(cp.sum((1/k)*cp.multiply(self.a, c)-(1/self.m)*c)<=rho)
         self.prob = cp.Problem(self.objective, self.constraints)
         self.prob.solve(solver=cp.ECOS,warm_start=True)
@@ -210,4 +205,14 @@ class GreedyOracle():
     def sup_function(self, a, k):
         alpha = (a/k - 1/self.m)
         reg = LinearRegression().fit(self.C, alpha)
-        return reg.predict(self.C)
+        return reg
+    
+    def get_representation(self, indices, k):
+        reg = self.sup_function(indices, k)
+        c = reg.predict(self.C)
+        rep = np.sum((1/k)*indices*c-(1/self.m)*c)
+        return rep
+
+    def get_similarity(self, indices):
+        sim = indices.T@self.similarity_scores
+        return sim
