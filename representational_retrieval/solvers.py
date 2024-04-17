@@ -84,13 +84,11 @@ class CVXPY():
 
         return representation, similarity, sparsity
     
-## @Carol: Please implement MMR here! ideally taking in your label matrix, similarity vector, and a lambda, get the set of retrieved vectors and then return the representation cost and the similarity score.
 # MMR algorithm defined in PATHS using CLIP embedding
 class MMR():
-    def __init__(self, similarity_scores, labels, lambda_, features):
+    def __init__(self, similarity_scores, labels, features):
         m = similarity_scores.shape[0]
         d = labels.shape[1]
-        lambda_ = lambda_ # trade-off parameter
         self.a = np.zeros(m)
         self.similarity_scores = similarity_scores
         # define what embedding to use for the diversity metric.
@@ -99,7 +97,7 @@ class MMR():
         self.mean_embedding = None
         self.std_embedding = None
 
-    def fit(self, k):
+    def fit(self, k, lambda_):
         if self.mean_embedding is None or self.std_embedding is None:
             self.statEmbedding()
 
@@ -110,13 +108,13 @@ class MMR():
                     continue
                 # temporary select the jth element
                 self.a[j] = 1
-                MMR_temp[j] = (1-self.lambda_)* self.similarity_scores.T @ self.a + self.lambda_ * self.marginal_diversity_score(j)
+                MMR_temp[j] = (1-lambda_)* self.similarity_scores.T @ self.a + lambda_ * self.marginal_diversity_score(j)
                 self.a[j] = 0
             # select the element with the highest MMR 
             self.a[np.argmax(MMR_temp)] = 1
         diversity_cost = self.marginal_diversity_score()
         similarity_cost = self.similarity_scores.T @ self.a
-        return diversity_cost, similarity_cost
+        return self.a, diversity_cost, similarity_cost
     
     def statEmbedding(self):
         distances = []
