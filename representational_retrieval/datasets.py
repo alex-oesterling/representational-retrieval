@@ -66,21 +66,21 @@ class CelebA(torch.utils.data.Dataset):
             target_idx = 1
 
         target_filepaths = set()
-        with open(path + "celeba/list_eval_partition.csv", "r") as f:
+        with open(path + "celeba/list_eval_partition.txt", "r") as f:
             split_lines = f.readlines()
             for line in split_lines[1:]:
                 line = line.strip()
-                line = line.split(",")
+                line = line.split()
                 if int(line[1]) == target_idx:
                     target_filepaths.add(line[0])
 
-        with open(path + "celeba/list_attr_celeba.csv", "r") as f:
+        with open(path + "celeba/list_attr_celeba.txt", "r") as f:
             lines = f.readlines()
-            lines = lines[1:]
+            lines = lines[2:]
             self.len = len(lines)
             for idx, line in enumerate(lines):
                 line = line.strip()
-                line = line.split(",")
+                line = line.split()
 
                 if line[0] not in target_filepaths:
                     continue
@@ -93,7 +93,7 @@ class CelebA(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
 
-        path = self.filepath + "/img_align_celeba/img_align_celeba/" + self.img_paths[idx]
+        path = self.filepath + "img_align_celeba/" + self.img_paths[idx]
         image = Image.open(path)
 
         label = self.labels[idx]
