@@ -9,6 +9,8 @@ import clip
 # from torchvision.datasets import CelebA
 from torch.utils.data import DataLoader
 sns.set_style("whitegrid")
+import pickle
+import os
 
 def mmr():
     return
@@ -23,7 +25,7 @@ def main():
     model, preprocess = clip.load("ViT-B/32", device=args.device)
 
     # Load the dataset
-    dataset = CelebA("/n/holylabs/LABS/hlakkaraju_lab/Lab/datasets/", attributes=None, train=True, transform=preprocess)
+    dataset = CelebA("/n/calmon_lab/Lab/datasets/", attributes=None, train=True, transform=preprocess)
 
     batch_size = 512
 
@@ -62,6 +64,7 @@ def main():
 
     reps = []
     sims = []
+    indices_list = []
     for p in tqdm(pvals):
         indices, diversity_cost, similarity_cost = solver.fit(args.k, p) 
         weighting_vector = oracle_function(indices, labels, model=LinearRegression)
@@ -69,12 +72,24 @@ def main():
         sim = (s.T @ indices)
         reps.append(rep)
         sims.append(sim)
+        indices_list.append(indices)
 
-
+    results = {}
+    results['reps'] = reps
+    results['sims'] = sims
+    results['indices'] = indices_list
+    results['pvals'] = pvals
+    result_path = '../results/'
+    filename_pkl = "mmr_rep_sim.pkl"
+    if not os.path.exists(result_path):
+        os.makedirs(result_path)
+    with open(result_path + filename_pkl, 'wb') as f:
+        pickle.dump(results, f)
+    
     plt.figure()
     plt.plot(reps, sims, label="Binary")
     plt.xlabel('Representation')
     plt.ylabel('Similarity')
-    plt.savefig("./results/mmr_rep_sim.png")
+    plt.savefig("../results/mmr_rep_sim.png")
 if __name__ == "__main__":
     main()

@@ -103,6 +103,9 @@ class MMR():
 
         for i in range(k):
             MMR_temp = np.zeros(len(self.embeddings))
+            if i==0:
+                self.a[np.argmax(self.similarity_scores)] = 1
+                continue
             for j in range(len(self.embeddings)):
                 if self.a[j] == 1:
                     continue
