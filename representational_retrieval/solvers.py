@@ -84,6 +84,7 @@ class CVXPY():
 
         return representation, similarity, sparsity
     
+<<<<<<< HEAD
     def get_representation(self, indices, k):
         rep = np.sqrt(np.sum(np.power((self.C.T @ indices)/k - self.cbar, 2)))
         return rep
@@ -93,13 +94,12 @@ class CVXPY():
         return sim
     
 ## @Carol: Please implement MMR here! ideally taking in your label matrix, similarity vector, and a lambda, get the set of retrieved vectors and then return the representation cost and the similarity score.
+=======
+>>>>>>> 6805656020d65729314e22c2692b9681996abf10
 # MMR algorithm defined in PATHS using CLIP embedding
 class MMR():
-    def __init__(self, similarity_scores, labels, lambda_, features):
-        m = similarity_scores.shape[0]
-        d = labels.shape[1]
-        lambda_ = lambda_ # trade-off parameter
-        self.a = np.zeros(m)
+    def __init__(self, similarity_scores, labels, features):
+        self.m = similarity_scores.shape[0]
         self.similarity_scores = similarity_scores
         # define what embedding to use for the diversity metric.
         # None (img itself), CLIP, or CLIP+PCA
@@ -107,24 +107,29 @@ class MMR():
         self.mean_embedding = None
         self.std_embedding = None
 
-    def fit(self, k):
+    def fit(self, k, lambda_):
         if self.mean_embedding is None or self.std_embedding is None:
             self.statEmbedding()
 
+        indices = np.zeros(self.m)
         for i in range(k):
             MMR_temp = np.zeros(len(self.embeddings))
+            if i==0:
+                indices[np.argmax(self.similarity_scores)] = 1
+                continue
             for j in range(len(self.embeddings)):
-                if self.a[j] == 1:
+                if indices[j] == 1:
                     continue
                 # temporary select the jth element
-                self.a[j] = 1
-                MMR_temp[j] = (1-self.lambda_)* self.similarity_scores.T @ self.a + self.lambda_ * self.marginal_diversity_score(j)
-                self.a[j] = 0
+                indices[j] = 1
+                MMR_temp[j] = (1-lambda_)* self.similarity_scores.T @ indices + lambda_ * self.marginal_diversity_score(indices,j)
+                indices[j] = 0
             # select the element with the highest MMR 
-            self.a[np.argmax(MMR_temp)] = 1
+            indices[np.argmax(MMR_temp)] = 1
+        AssertionError(np.sum(indices)==k)
         diversity_cost = self.marginal_diversity_score()
-        similarity_cost = self.similarity_scores.T @ self.a
-        return diversity_cost, similarity_cost
+        similarity_cost = self.similarity_scores.T @ indices
+        return indices, diversity_cost, similarity_cost
     
     def statEmbedding(self):
         distances = []
@@ -137,11 +142,11 @@ class MMR():
         self.std_embedding = np.std(distances)
 
 
-    def marginal_diversity_score(self, addition_index=None):
+    def marginal_diversity_score(self, indices, addition_index=None):
         # compute the diversity score of the entire set
         if addition_index is None:
             marginal_diversity = 0
-            subset = self.embeddings[self.a==1]
+            subset = self.embeddings[indices==1]
             for i in range(len(subset)):
                 for j in range(i+1, len(subset)):
                     marginal_diversity += (np.linalg.norm(subset[i] - subset[j])-self.mean_embedding)/self.std_embedding
@@ -151,8 +156,8 @@ class MMR():
         else:
             # compute the diversity score of adding the addition_index to the current set
             marginal_diversity = 0
-            self.a[addition_index] = 0
-            subset = self.embeddings[self.a==1]
+            indices[addition_index] = 0
+            subset = self.embeddings[indices==1]
             for i in range(len(subset)):
                 marginal_diversity += (np.linalg.norm(self.embeddings[addition_index] - subset[i])-self.mean_embedding)/self.std_embedding
             marginal_diversity /= len(subset)
