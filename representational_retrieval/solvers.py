@@ -1,6 +1,7 @@
 import numpy as np
 import cvxpy as cp
 from sklearn.linear_model import LinearRegression
+from utils import statEmbedding
 
 def oracle_function(indices, dataset, model=LinearRegression):
     m = dataset.shape[0]
@@ -105,7 +106,7 @@ class MMR():
 
     def fit(self, k, lambda_):
         if self.mean_embedding is None or self.std_embedding is None:
-            self.statEmbedding()
+            self.mean_embedding, self.std_embedding =  statEmbedding(self.embeddings)
 
         indices = np.zeros(self.m)
         selection = []
@@ -130,16 +131,6 @@ class MMR():
         AssertionError(np.sum(indices)==k)
         MMR_cost = self.marginal_diversity_score(indices)
         return indices, MMR_cost, selection
-    
-    def statEmbedding(self):
-        distances = []
-        for i in range(len(self.embeddings)):
-            for j in range(i+1, len(self.embeddings)):
-                distance = np.linalg.norm(self.embeddings[i] - self.embeddings[j])
-                distances.append(distance)
-        distances = np.array(distances)
-        self.mean_embedding = np.mean(distances)
-        self.std_embedding = np.std(distances)
 
 
     def marginal_diversity_score(self, indices, addition_index=None):
