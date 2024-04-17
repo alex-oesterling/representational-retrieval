@@ -163,7 +163,7 @@ class MMR():
 
 # minimize MSE of a regression problem
 class GreedyOracle():
-    def __init__(self, similarity_scores, labels):
+    def __init__(self, similarity_scores, labels, model=LinearRegression):
         self.m = similarity_scores.shape[0]
         self.d = labels.shape[1]
 
@@ -173,6 +173,8 @@ class GreedyOracle():
         self.C = labels
 
         self.similarity_scores = similarity_scores
+
+        self.model=model
 
     def fit(self, k, num_iter, rho):
         self.objective = cp.Maximize(self.similarity_scores.T @ self.a)
@@ -206,7 +208,7 @@ class GreedyOracle():
 
     def sup_function(self, a, k):
         alpha = (a/k - 1/self.m)
-        reg = LinearRegression().fit(self.C, alpha)
+        reg = self.model().fit(self.C, alpha)
         return reg
     
     def get_representation(self, indices, k):
