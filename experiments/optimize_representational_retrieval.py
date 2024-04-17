@@ -6,7 +6,6 @@ from tqdm.auto import tqdm
 import argparse
 import seaborn as sns
 import clip
-# from torchvision.datasets import CelebA
 from torch.utils.data import DataLoader
 sns.set_style("whitegrid")
 
@@ -20,7 +19,7 @@ def main():
     model, preprocess = clip.load("ViT-B/32", device=args.device)
 
     # Load the dataset
-    dataset = CelebA("/n/holylabs/LABS/hlakkaraju_lab/Lab/datasets/", attributes=None, train=True, transform=preprocess)
+    dataset = CelebA("/n/calmon_lab/Lab/datasets/", attributes=None, train=True, transform=preprocess)
 
     batch_size = 512
 

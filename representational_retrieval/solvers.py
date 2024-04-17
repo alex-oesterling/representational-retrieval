@@ -84,7 +84,6 @@ class CVXPY():
 
         return representation, similarity, sparsity
     
-<<<<<<< HEAD
     def get_representation(self, indices, k):
         rep = np.sqrt(np.sum(np.power((self.C.T @ indices)/k - self.cbar, 2)))
         return rep
@@ -94,8 +93,6 @@ class CVXPY():
         return sim
     
 ## @Carol: Please implement MMR here! ideally taking in your label matrix, similarity vector, and a lambda, get the set of retrieved vectors and then return the representation cost and the similarity score.
-=======
->>>>>>> 6805656020d65729314e22c2692b9681996abf10
 # MMR algorithm defined in PATHS using CLIP embedding
 class MMR():
     def __init__(self, similarity_scores, labels, features):
@@ -184,17 +181,17 @@ class GreedyOracle():
         self.prob.solve(solver=cp.ECOS,warm_start=True)
 
         print(self.a.value, flush=True)
-        print(np.sum((1/k)*self.a.value-(1/self.m)), flush=True)
-
+        print(np.abs(np.sum((1/k)*self.a.value-(1/self.m))), flush=True)
 
         # reps = []
         # sims = []
         for _ in range(num_iter):
             reg = self.sup_function(self.a.value, k)
             c = reg.predict(self.C)
-            if np.sum((1/k)*self.a.value*c-(1/self.m)*c) < rho:
+            c /= np.linalg.norm(c)
+            if np.abs(np.sum((1/k)*self.a.value*c-(1/self.m)*c)) < rho:
                 print("constraints satisfied, exiting early")
-                print(np.sum((1/k)*self.a.value*c-(1/self.m)*c))
+                print(np.abs(np.sum((1/k)*self.a.value*c-(1/self.m)*c)))
                 print(rho)
                 break
             self.max_similarity(c, k, rho)
@@ -203,7 +200,7 @@ class GreedyOracle():
 
 
     def max_similarity(self, c, k, rho):
-        self.constraints.append(cp.sum((1/k)*cp.multiply(self.a, c)-(1/self.m)*c)<=rho)
+        self.constraints.append(cp.abs(cp.sum((1/k)*cp.multiply(self.a, c)-(1/self.m)*c))<=rho)
         self.prob = cp.Problem(self.objective, self.constraints)
         self.prob.solve(solver=cp.ECOS,warm_start=True)
 
@@ -215,7 +212,8 @@ class GreedyOracle():
     def get_representation(self, indices, k):
         reg = self.sup_function(indices, k)
         c = reg.predict(self.C)
-        rep = np.sum((1/k)*indices*c-(1/self.m)*c)
+        c /= np.linalg.norm(c)
+        rep = np.abs(np.sum((1/k)*indices*c-(1/self.m)*c))
         return rep
 
     def get_similarity(self, indices):
