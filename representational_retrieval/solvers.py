@@ -1,7 +1,7 @@
 import numpy as np
 import cvxpy as cp
 from sklearn.linear_model import LinearRegression
-from utils import statEmbedding
+from .utils import statEmbedding
 
 def oracle_function(indices, dataset, model=LinearRegression):
     m = dataset.shape[0]
