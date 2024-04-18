@@ -1,6 +1,7 @@
 import numpy as np
 import cvxpy as cp
 from sklearn.linear_model import LinearRegression
+from .utils import statEmbedding
 
 def oracle_function(indices, dataset, model=None):
     if model is None:
@@ -94,7 +95,6 @@ class CVXPY():
         sim = self.similarity_scores.T @ indices
         return sim
     
-## @Carol: Please implement MMR here! ideally taking in your label matrix, similarity vector, and a lambda, get the set of retrieved vectors and then return the representation cost and the similarity score.
 # MMR algorithm defined in PATHS using CLIP embedding
 class MMR():
     def __init__(self, similarity_scores, labels, features):
@@ -108,13 +108,16 @@ class MMR():
 
     def fit(self, k, lambda_):
         if self.mean_embedding is None or self.std_embedding is None:
-            self.statEmbedding()
+            self.mean_embedding, self.std_embedding =  statEmbedding(self.embeddings)
 
         indices = np.zeros(self.m)
+        selection = []
         for i in range(k):
-            MMR_temp = np.zeros(len(self.embeddings))
+            MMR_temp = np.full(len(self.embeddings), -np.inf)
             if i==0:
-                indices[np.argmax(self.similarity_scores)] = 1
+                idx = np.argmax(self.similarity_scores)
+                selection.append(idx)
+                indices[idx] = 1
                 continue
             for j in range(len(self.embeddings)):
                 if indices[j] == 1:
@@ -124,21 +127,12 @@ class MMR():
                 MMR_temp[j] = (1-lambda_)* self.similarity_scores.T @ indices + lambda_ * self.marginal_diversity_score(indices,j)
                 indices[j] = 0
             # select the element with the highest MMR 
+            idx = np.argmax(MMR_temp)
+            selection.append(idx)
             indices[np.argmax(MMR_temp)] = 1
         AssertionError(np.sum(indices)==k)
-        diversity_cost = self.marginal_diversity_score()
-        similarity_cost = self.similarity_scores.T @ indices
-        return indices, diversity_cost, similarity_cost
-    
-    def statEmbedding(self):
-        distances = []
-        for i in range(len(self.embeddings)):
-            for j in range(i+1, len(self.embeddings)):
-                distance = np.linalg.norm(self.embeddings[i] - self.embeddings[j])
-                distances.append(distance)
-        distances = np.array(distances)
-        self.mean_embedding = np.mean(distances)
-        self.std_embedding = np.std(distances)
+        MMR_cost = self.marginal_diversity_score(indices)
+        return indices, MMR_cost, selection
 
 
     def marginal_diversity_score(self, indices, addition_index=None):
