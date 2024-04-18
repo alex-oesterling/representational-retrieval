@@ -2,11 +2,13 @@ import numpy as np
 import cvxpy as cp
 from sklearn.linear_model import LinearRegression
 
-def oracle_function(indices, dataset, model=LinearRegression):
+def oracle_function(indices, dataset, model=None):
+    if model is None:
+        model = LinearRegression()
     m = dataset.shape[0]
     k = int(np.sum(indices))
     alpha = (indices/k - 1/m)
-    reg = model().fit(dataset, alpha)
+    reg = model.fit(dataset, alpha)
     return reg
 
 class CVXPY():
@@ -163,7 +165,7 @@ class MMR():
 
 # minimize MSE of a regression problem
 class GreedyOracle():
-    def __init__(self, similarity_scores, labels, model=LinearRegression):
+    def __init__(self, similarity_scores, labels, model=None):
         self.m = similarity_scores.shape[0]
         self.d = labels.shape[1]
 
@@ -174,27 +176,26 @@ class GreedyOracle():
 
         self.similarity_scores = similarity_scores
 
-        self.model=model
+        if model is None:
+            self.model = LinearRegression()
+        else:
+            self.model = model
 
     def fit(self, k, num_iter, rho):
         self.objective = cp.Maximize(self.similarity_scores.T @ self.a)
         self.constraints = [sum(self.a)==k, 0<=self.a, self.a<=1]
         self.prob = cp.Problem(self.objective, self.constraints)
         self.prob.solve(solver=cp.ECOS,warm_start=True)
-
-        print(self.a.value, flush=True)
-        print(np.abs(np.sum((1/k)*self.a.value-(1/self.m))), flush=True)
-
         # reps = []
         # sims = []
         for _ in range(num_iter):
-            reg = self.sup_function(self.a.value, k)
-            c = reg.predict(self.C)
+            self.sup_function(self.a.value, k)
+            c = self.model.predict(self.C)
             c /= np.linalg.norm(c)
             if np.abs(np.sum((1/k)*self.a.value*c-(1/self.m)*c)) < rho:
                 print("constraints satisfied, exiting early")
-                print(np.abs(np.sum((1/k)*self.a.value*c-(1/self.m)*c)))
-                print(rho)
+                print("\t", np.abs(np.sum((1/k)*self.a.value*c-(1/self.m)*c)))
+                print("\t", rho)
                 break
             self.max_similarity(c, k, rho)
 
@@ -208,12 +209,13 @@ class GreedyOracle():
 
     def sup_function(self, a, k):
         alpha = (a/k - 1/self.m)
-        reg = self.model().fit(self.C, alpha)
-        return reg
+        self.model.fit(self.C, alpha)
+        # return self.model
     
     def get_representation(self, indices, k):
-        reg = self.sup_function(indices, k)
-        c = reg.predict(self.C)
+        self.sup_function(indices, k)
+        c = self.model.predict(self.C)
+        print("norm", np.linalg.norm(c), flush=True)
         c /= np.linalg.norm(c)
         rep = np.abs(np.sum((1/k)*indices*c-(1/self.m)*c))
         return rep
