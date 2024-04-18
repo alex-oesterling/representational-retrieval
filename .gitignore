@@ -161,4 +161,4 @@ cython_debug/
 
 script.sh
 slurm_out/*
-results/*
+results/*.png
