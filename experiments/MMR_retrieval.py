@@ -6,26 +6,42 @@ from tqdm.auto import tqdm
 import argparse
 import seaborn as sns
 import clip
-# from torchvision.datasets import CelebA
+from sklearn.ensemble import RandomForestRegressor
 from torch.utils.data import DataLoader
 sns.set_style("whitegrid")
 import pickle
 import os
 
-def mmr():
-    return
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-device', default="cuda", type=str)
+    parser.add_argument('-dataset', default="celeba", type=str)
     parser.add_argument('-n_samples', default=10000, type=int)
+    parser.add_argument('-query', default="A photo of a CEO", type=str)
     parser.add_argument('-k', default=10, type=int)
+    parser.add_argument('-functionclass', default="linearregression", type=str)
     args = parser.parse_args()
 
     model, preprocess = clip.load("ViT-B/32", device=args.device)
 
     # Load the dataset
-    dataset = CelebA("/n/calmon_lab/Lab/datasets/", attributes=None, train=True, transform=preprocess)
+    if args.dataset == "fairface":
+        pass
+    elif args.dataset == "occupations":
+        pass
+    elif args.dataset == "celeba":
+        dataset = CelebA("/n/holylabs/LABS/calmon_lab/Lab/datasets/", attributes=None, train=True, transform=preprocess)
+    else:
+        print("Dataset not supported!")
+        exit()
+
+    if args.functionclass == "randomforest":
+        oracle = RandomForestRegressor(max_depth=2)
+    elif args.functionclass == "linearregression":
+        oracle = LinearRegression()
+    else:
+        print("Function class not supported.")
+        exit()
 
     batch_size = 512
 
@@ -46,7 +62,7 @@ def main():
     features, labels = torch.cat(all_features).cpu().numpy(), torch.cat(all_labels).cpu().numpy()
     m = labels.shape[0]
 
-    q = 'A photo of a Professor.'
+    q = args.query
 
     q_token = clip.tokenize(q).to(args.device)
     with torch.no_grad():
@@ -60,17 +76,17 @@ def main():
     s = features @ q_emb.T
 
     solver = MMR(s, labels, features)
-    pvals = np.linspace(1e-5, 1-1e-5, 50)
+    lambdas = np.linspace(0, 1-1e-5, 50)
 
     reps = []
     sims = []
     indices_list = []
     selection_list = []
     MMR_cost_list = []
-    for p in tqdm(pvals):
+    for p in tqdm(lambdas):
         indices, diversity_cost, selection = solver.fit(args.k, p) 
         # c(x)
-        weighting_clf = oracle_function(indices, labels, model=LinearRegression)
+        weighting_clf = oracle_function(indices, labels, model=oracle)
         # c(x) evaluated on data points and normalized
         weighting_vector  = weighting_clf.predict(labels)
         weighting_vector/= np.linalg.norm(weighting_vector)
@@ -86,11 +102,11 @@ def main():
     results['MPR'] = reps
     results['sims'] = sims
     results['indices'] = indices_list
-    results['pvals'] = pvals
+    results['lambdas'] = lambdas
     results['selection'] = selection_list
     results['MMR_cost'] = MMR_cost_list
     result_path = '../results/'
-    filename_pkl = "mmr_rep_sim.pkl"
+    filename_pkl = "{}_mmr_{}_{}.pkl".format(args.dataset, args.k, args.functionclass)
     if not os.path.exists(result_path):
         os.makedirs(result_path)
     with open(result_path + filename_pkl, 'wb') as f:
