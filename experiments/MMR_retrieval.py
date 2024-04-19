@@ -22,6 +22,8 @@ def main():
     parser.add_argument('-functionclass', default="linearregression", type=str)
     args = parser.parse_args()
 
+    print(args)
+
     model, preprocess = clip.load("ViT-B/32", device=args.device)
 
     # Load the dataset
@@ -75,6 +77,10 @@ def main():
     # compute similarities
     s = features @ q_emb.T
 
+    top_indices = np.zeros(m)
+    top_indices[np.argsort(s.squeeze())[::-1][:args.k]] = 1
+    sim_upper_bound = s.T@top_indices
+
     solver = MMR(s, labels, features)
     lambdas = np.linspace(0, 1-1e-5, 50)
 
@@ -92,6 +98,12 @@ def main():
         weighting_vector/= np.linalg.norm(weighting_vector)
         rep = np.sum((1/args.k)*indices* weighting_vector -(1/m)*weighting_vector) # weighting_vector is c
         sim = (s.T @ indices)
+
+        print(sim_upper_bound, sim)
+        print(np.equal(indices, top_indices))
+
+        exit()
+
         reps.append(rep)
         sims.append(sim)
         indices_list.append(indices)
