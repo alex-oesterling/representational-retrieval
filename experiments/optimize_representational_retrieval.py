@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 import argparse
+import pickle
 import seaborn as sns
 import clip
 from sklearn.ensemble import RandomForestRegressor
@@ -24,7 +25,7 @@ def main():
 
     # Load the dataset
     if args.dataset == "fairface":
-        pass
+        dataset = FairFace("/n/holylabs/LABS/calmon_lab/Lab/datasets/", train=True, transform=preprocess)
     elif args.dataset == "occupations":
         pass
     elif args.dataset == "celeba":
@@ -85,7 +86,10 @@ def main():
     rounded_reps_final = []
     rounded_sims_final = []
     sparsities = []
-    for rho in np.logspace(-4, 0.5, 20):
+    rounded_indices_list = []
+    relaxed_indices_list = []
+    rhos = np.logspace(-4, 0.5, 20)
+    for rho in rhos:
         indices = solver.fit(args.k, 10, rho)
         sparsity = sum(indices>1e-4)
         indices_rounded = indices.copy()
@@ -107,11 +111,28 @@ def main():
         rounded_reps_final.append(rounded_rep)
         rounded_sims_final.append(rounded_sim)
         sparsities.append(sparsity)
+        rounded_indices_list.append(indices_rounded)
+        relaxed_indices_list.append(indices)
 
     rep_upper_bound = solver.get_representation(top_indices, args.k)
 
     print("Sim upper bound:", sim_upper_bound)
     print("Rep lower bound:", rep_upper_bound)
+
+    results = {}
+    results['relaxed_MPR'] = reps_final
+    results['relaxed_sims'] = sims_final
+    results['rounded_MPR'] = rounded_reps_final
+    results['rounded_sims'] = rounded_sims_final
+    results['relaxed_indices'] = relaxed_indices_list
+    results['rounded_indices'] = rounded_indices_list
+    results['rhos'] = rhos
+    result_path = './results/'
+    filename_pkl = "{}_oracle_{}_{}.pkl".format(args.dataset, args.k, args.functionclass)
+    if not os.path.exists(result_path):
+        os.makedirs(result_path)
+    with open(result_path + filename_pkl, 'wb') as f:
+        pickle.dump(results, f)
 
     plt.figure()
     plt.title("Oracle, {}, {}".format(args.functionclass, args.dataset))

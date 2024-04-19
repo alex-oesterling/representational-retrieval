@@ -125,7 +125,7 @@ class Occupations(torch.utils.data.Dataset):
         return self.images[idx], self.labels[idx]
     
 class FairFace(torch.utils.data.Dataset):
-    def __init__(self, path, train=True, transform=torchvision.transforms.ToTensor()):
+    def __init__(self, path, train=True, transform=torchvision.transforms.ToTensor(), race_one_hot=True):
         self.filepath = os.path.join(path, "fairface/")
 
         self.transform = transform
@@ -138,14 +138,39 @@ class FairFace(torch.utils.data.Dataset):
         else:
             df = pd.read_csv(self.filepath + "fairface_label_val.csv")
 
-        self.labels = [list(x) for x in list(zip(df.gender, df.race, df.age))]
+        race_to_idx = {}
+        for i, race in enumerate(df.race.unique()):
+            race_to_idx[race] = i
+
+        gender_to_idx = {
+            'Male': 0,
+            'Female': 1
+        }
+
+        age_to_idx = {
+            '0-2': 0,
+            '3-9': 1,
+            '10-19': 2,
+            '20-29': 3,
+            '30-39': 4,
+            '40-49': 5,
+            '50-59': 6,
+            '60-69': 7,
+            'more than 70': 8
+        }
+
+        one_hot = torch.nn.functional.one_hot(torch.tensor([race_to_idx[race] for race in df.race])).numpy()
+        gender_idx = [gender_to_idx[gen] for gen in df.gender]
+        age_idx = [age_to_idx[age] for age in df.age]
+
+        self.labels = []
+        for i in range(len(gender_idx)):
+            self.labels.append([gender_idx[i], age_idx[i]] + list(one_hot[i]))
+
+        self.labels = torch.tensor(self.labels)
 
         construct_path = lambda x: os.path.join(self.filepath, x)
         self.img_paths = [construct_path(x) for x in df.file]
-
-        ## For speed can preload data, but too large to fit on GPU in general
-        # for path in self.img_paths:
-        #     self.images.append(self.transform(Image.open(path)))
 
     def __len__(self):
         return len(self.labels)
@@ -155,11 +180,11 @@ class FairFace(torch.utils.data.Dataset):
     
 class UTKFace(torch.utils.data.Dataset):
     def __init__(self, path, train=True, transform=torchvision.transforms.ToTensor()):
-        # self.filepath = os.path.join(path, "fairface/")
+        self.filepath = os.path.join(path, "utkface/")
 
-        # self.transform = transform
-        # self.images = []
-        # self.labels = []
+        self.transform = transform
+        self.imagepaths = []
+        self.labels = []
 
         # if train:
         #     df = pd.read_csv(self.filepath + "fairface_label_train.csv")
