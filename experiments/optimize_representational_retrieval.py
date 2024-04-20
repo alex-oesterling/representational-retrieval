@@ -127,7 +127,7 @@ def main():
     results['relaxed_indices'] = relaxed_indices_list
     results['rounded_indices'] = rounded_indices_list
     results['rhos'] = rhos
-    result_path = './results/'
+    result_path = './results/alex/'
     filename_pkl = "{}_oracle_{}_{}.pkl".format(args.dataset, args.k, args.functionclass)
     if not os.path.exists(result_path):
         os.makedirs(result_path)

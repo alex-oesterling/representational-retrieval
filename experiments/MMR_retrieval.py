@@ -105,7 +105,7 @@ def main():
     results['lambdas'] = lambdas
     results['selection'] = selection_list
     results['MMR_cost'] = MMR_cost_list
-    result_path = './results/'
+    result_path = './results/alex/'
     filename_pkl = "{}_mmr_{}_{}.pkl".format(args.dataset, args.k, args.functionclass)
     if not os.path.exists(result_path):
         os.makedirs(result_path)
