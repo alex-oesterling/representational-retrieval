@@ -21,8 +21,6 @@ def main():
     parser.add_argument('-functionclass', default="linearregression", type=str)
     args = parser.parse_args()
 
-    print(args)
-
     model, preprocess = clip.load("ViT-B/32", device=args.device)
 
     # Load the dataset
