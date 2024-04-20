@@ -117,7 +117,7 @@ def main():
     results['lambdas'] = lambdas
     results['selection'] = selection_list
     results['MMR_cost'] = MMR_cost_list
-    result_path = '../results/'
+    result_path = './results/'
     filename_pkl = "{}_mmr_{}_{}.pkl".format(args.dataset, args.k, args.functionclass)
     if not os.path.exists(result_path):
         os.makedirs(result_path)
@@ -128,6 +128,6 @@ def main():
     plt.plot(reps, sims, label="Binary")
     plt.xlabel('Representation')
     plt.ylabel('Similarity')
-    plt.savefig("../results/mmr_rep_sim.png")
+    plt.savefig("./results/mmr_rep_sim.png")
 if __name__ == "__main__":
     main()
