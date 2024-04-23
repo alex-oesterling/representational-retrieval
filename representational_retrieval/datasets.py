@@ -110,6 +110,8 @@ class Occupations(torch.utils.data.Dataset):
         self.images = []
         self.labels = []
 
+        ## Labels is [gender, occupation_one_hot]
+
         df = pd.read_csv(self.filepath + "gender_labelled_images.csv")
         print(df.search_term) ## FIXME
 
@@ -179,6 +181,8 @@ class FairFace(torch.utils.data.Dataset):
         gender_idx = [gender_to_idx[gen] for gen in df.gender]
         age_idx = [age_to_idx[age] for age in df.age]
 
+        ## labels is [gender_binary, age_categorical, race_one_hot]
+
         self.labels = []
         for i in range(len(gender_idx)):
             self.labels.append([gender_idx[i], age_idx[i]] + list(one_hot[i]))
@@ -202,6 +206,8 @@ class UTKFace(torch.utils.data.Dataset):
         self.imagepaths = []
         self.labels = []
 
+        ## labels is [gender, age, race]
+
         for path in glob.glob(os.path.join(self.filepath, "*/*.jpg")):
 
             attributes = path.split("/")[-1].split("_")
@@ -210,7 +216,7 @@ class UTKFace(torch.utils.data.Dataset):
             # print(path.split("/")[-1])
             # print(attributes)
             try:
-                self.labels.append([int(attributes[0]), int(attributes[1]), int(attributes[2])])
+                self.labels.append([int(attributes[1]), int(attributes[0]), int(attributes[2])])
             except:
                 continue
             self.imagepaths.append(path)
