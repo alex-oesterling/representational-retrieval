@@ -1,16 +1,9 @@
 import numpy as np
 import cvxpy as cp
 from sklearn.linear_model import LinearRegression
-from .utils import statEmbedding
-
-def oracle_function(indices, dataset, model=None):
-    if model is None:
-        model = LinearRegression()
-    m = dataset.shape[0]
-    k = int(np.sum(indices))
-    alpha = (indices/k - 1/m)
-    reg = model.fit(dataset, alpha)
-    return reg
+from .utils import statEmbedding, fon
+import torch
+import random
 
 class CVXPY():
     def __init__(self, similarity_scores, labels):
@@ -217,3 +210,93 @@ class GreedyOracle():
     def get_similarity(self, indices):
         sim = indices.T@self.similarity_scores
         return sim
+    
+class ClipClip():
+    # As defined in the paper "Are Gender-Neutral Queries Really Gender-Neutral? Mitigating Gender Bias in Image Search" (Wang et. al. 2021)
+    def __init__(self, features, orderings=None, device='cuda'):
+        self.features = features
+        self.device = device
+        self.m = features.shape[0]
+        if orderings:
+            self.orderings = orderings
+
+    def fit(self, k, num_cols_to_drop, query_embedding):
+        clip_features = torch.index_select(self.features, 1, torch.tensor(self.orderings[num_cols_to_drop:]).to(self.device))
+        clip_query = torch.index_select(query_embedding, 1, torch.tensor(self.orderings[num_cols_to_drop:]).to(self.device))
+
+        similarities = (clip_features @ clip_query.T).flatten()
+        selections = similarities.argsort(descending=True).cpu().flatten()[:k]
+        indices = np.zeros(self.m)
+        indices[selections] = 1    
+        AssertionError(np.sum(indices)==k)
+        return indices, selections
+
+class PBM():
+    ## As defined in the paper "Mitigating Test-Time Bias for Fair Image Retrieval" (Kong et. al. 2023)
+    def __init__(self, features, similarity_scores, pbm_labels, pbm_classes):
+        self.features = features
+        self.similarity_scores = similarity_scores
+        self.m = features.shape[0]
+        self.pbm_label = pbm_labels # predicted sensitive group label
+        self.pbm_classes = pbm_classes
+
+    def fit(self, k=10, eps=0):
+        
+        best = self.similarity_scores.argsort(descending=True).cpu().numpy().flatten()
+        np_sim = self.similarity_scores.cpu().numpy()
+
+        selections = []
+
+        neutrals = [x for x in best if self.pbm_label[x] == 0]
+        classes = [[x for x in best if self.pbm_label[x]== i] for i in range(1, len(self.pbm_classes))]
+
+    
+        while len(selections) < k:
+            if random.random() < eps:
+                try:
+                    neutral_sim = np_sim[neutrals[0]]
+                except:
+                    neutral_sim = -1
+                
+                max_class, idx = 0, 0
+                for i, c in enumerate(classes):
+                    try:
+                        class_sim = np_sim[c[0]]
+                    except:
+                        class_sim = -1
+                    if class_sim > max_class:
+                        max_class = class_sim
+                        idx = i
+                if max_class > neutral_sim:
+                    selections.append(classes[idx][0])
+                    classes[idx].pop(0)
+                else:
+                    selections.append(neutrals[0])
+                    neutrals.pop(0)
+                        
+            else:
+                best_neutral = neutrals[0]
+                best_for_classes = [fon(c) for c in classes]
+                best_for_classes_vals = [c for c in best_for_classes if c is not None]
+
+                similarities_for_classes = [np_sim[x] for x in best_for_classes_vals]
+                avg_sim = np.mean(similarities_for_classes)
+                neutral_sim = self.similarity_scores[best_neutral]
+
+                if avg_sim > neutral_sim:
+                    if len(selections) + len(best_for_classes_vals) > k:
+                        best_for_classes_vals = random.choices(best_for_classes_vals, k=k-len(selections))
+                    selections += best_for_classes_vals
+
+                    for i, x in enumerate(best_for_classes):
+                        if x is not None:
+                            classes[i].pop(0)
+                else:
+                    selections.append(best_neutral)
+                    neutrals.pop(0)
+
+        indices = np.zeros(self.m)
+        indices[selections] = 1    
+        AssertionError(np.sum(indices)==k)
+        return indices, selections
+
