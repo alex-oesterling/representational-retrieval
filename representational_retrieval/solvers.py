@@ -3,14 +3,41 @@ import cvxpy as cp
 from sklearn.linear_model import LinearRegression
 from .utils import statEmbedding
 
-def oracle_function(indices, dataset, model=None):
+def oracle_function(indices, dataset, curation_set=None, model=None): ## FIXME
     if model is None:
         model = LinearRegression()
+
     m = dataset.shape[0]
     k = int(np.sum(indices))
-    alpha = (indices/k - 1/m)
-    reg = model.fit(dataset, alpha)
+    if curation_set is not None:
+        expanded_dataset = np.concatenate((dataset, curation_set), axis=0)
+        curation_indicator = np.concatenate((np.zeros(dataset.shape[0]), np.ones(curation_set.shape[0])))
+        a_expanded = np.concatenate((indices, np.zeros(curation_set.shape[0])))
+        m = curation_set.shape[0]
+        alpha = (a_expanded/k - curation_indicator/m)
+        reg = model.fit(expanded_dataset, alpha)
+    else:
+        alpha = (indices/k - 1/m)
+        reg = model.fit(dataset, alpha)
     return reg
+
+def compute_mpr(indices, dataset, curation_set=None, model=None):
+    reg = oracle_function(indices, dataset, curation_set=curation_set, model=model)
+
+    m = dataset.shape[0]
+    k = int(np.sum(indices))
+    if curation_set is not None:
+        expanded_dataset = np.concatenate((dataset, curation_set), axis=0)
+        m = curation_set.shape[0]
+        c = reg.predict(expanded_dataset)
+        c /= np.linalg.norm(c)
+        mpr = np.abs(np.sum((indices/k)*c[:dataset.shape[0]] - (1/m)*c[dataset.shape[0]:]))
+    else:
+        c = reg.predict(dataset)
+        c /= np.linalg.norm(c)
+        mpr = np.abs(np.sum((indices/k)*c - (1/m)*c))
+    
+    return mpr
 
 class CVXPY():
     def __init__(self, similarity_scores, labels):
@@ -159,14 +186,21 @@ class MMR():
 
 # minimize MSE of a regression problem
 class GreedyOracle():
-    def __init__(self, similarity_scores, labels, model=None):
+    def __init__(self, similarity_scores, dataset, curation_set=None, model=None):
         self.m = similarity_scores.shape[0]
-        self.d = labels.shape[1]
+        self.d = dataset.shape[1]
 
         self.a = cp.Variable(self.m)
         self.y = cp.Variable(self.d)
         self.rho = cp.Parameter(nonneg=True) #similarity value
-        self.C = labels
+        self.dataset = dataset
+
+        if curation_set is None: ## If no curation set is provided, compute MPR over the retrieval set
+            self.curation_set = self.dataset
+        else:
+            self.curation_set = curation_set
+
+        self.expanded_dataset = np.concatenate((self.dataset, self.curation_set), axis=0)
 
         self.similarity_scores = similarity_scores
 
@@ -184,9 +218,11 @@ class GreedyOracle():
         # sims = []
         for _ in range(num_iter):
             self.sup_function(self.a.value, k)
-            c = self.model.predict(self.C)
+            c = self.model.predict(self.expanded_dataset)
             c /= np.linalg.norm(c)
-            if np.abs(np.sum((1/k)*self.a.value*c-(1/self.m)*c)) < rho:
+
+            retrieval_size = self.dataset.shape[0]
+            if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
                 print("constraints satisfied, exiting early")
                 print("\t", np.abs(np.sum((1/k)*self.a.value*c-(1/self.m)*c)))
                 print("\t", rho)
@@ -197,18 +233,21 @@ class GreedyOracle():
 
 
     def max_similarity(self, c, k, rho):
-        self.constraints.append(cp.abs(cp.sum((1/k)*cp.multiply(self.a, c)-(1/self.m)*c))<=rho)
+        retrieval_size = self.dataset.shape[0]
+        self.constraints.append(cp.abs(cp.sum((1/k)*cp.multiply(self.a, c[:retrieval_size])-(1/self.m)*c[retrieval_size:]))<=rho)
         self.prob = cp.Problem(self.objective, self.constraints)
         self.prob.solve(solver=cp.ECOS,warm_start=True)
 
     def sup_function(self, a, k):
-        alpha = (a/k - 1/self.m)
-        self.model.fit(self.C, alpha)
+        curation_indicator = np.concatenate((np.zeros(self.dataset.shape[0]), np.ones(self.curation_set.shape[0])))
+        a_expanded = np.concatenate((a, np.zeros(self.curation_set.shape[0])))
+        alpha = (a_expanded/k - curation_indicator/self.m)
+        self.model.fit(self.expanded_dataset, alpha)
         # return self.model
     
     def get_representation(self, indices, k):
         self.sup_function(indices, k)
-        c = self.model.predict(self.C)
+        c = self.model.predict(self.dataset)
         print("norm", np.linalg.norm(c), flush=True)
         c /= np.linalg.norm(c)
         rep = np.abs(np.sum((1/k)*indices*c-(1/self.m)*c))

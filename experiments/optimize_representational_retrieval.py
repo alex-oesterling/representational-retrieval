@@ -27,7 +27,9 @@ def main():
     if args.dataset == "fairface":
         dataset = FairFace("/n/holylabs/LABS/calmon_lab/Lab/datasets/", train=True, transform=preprocess)
     elif args.dataset == "occupations":
-        pass
+        dataset = Occupations("/n/holylabs/LABS/calmon_lab/Lab/datasets/", transform=preprocess)
+    elif args.dataset == "utkface":
+        dataset = UTKFace("/n/holylabs/LABS/calmon_lab/Lab/datasets/", transform=preprocess)
     elif args.dataset == "celeba":
         dataset = CelebA("/n/holylabs/LABS/calmon_lab/Lab/datasets/", attributes=None, train=True, transform=preprocess)
     else:

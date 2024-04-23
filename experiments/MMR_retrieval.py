@@ -86,11 +86,12 @@ def main():
     for p in tqdm(lambdas):
         indices, diversity_cost, selection = solver.fit(args.k, p) 
         # c(x)
-        weighting_clf = oracle_function(indices, labels, model=oracle)
-        # c(x) evaluated on data points and normalized
-        weighting_vector  = weighting_clf.predict(labels)
-        weighting_vector/= np.linalg.norm(weighting_vector)
-        rep = np.sum((1/args.k)*indices* weighting_vector -(1/m)*weighting_vector) # weighting_vector is c
+        rep = compute_mpr(indices, labels, model=oracle)
+        # weighting_clf = oracle_function(indices, labels, model=oracle)
+        # # c(x) evaluated on data points and normalized
+        # weighting_vector  = weighting_clf.predict(labels)
+        # weighting_vector/= np.linalg.norm(weighting_vector)
+        # rep = np.abs(np.sum((1/args.k)*indices* weighting_vector -(1/m)*weighting_vector)) # weighting_vector is c
         sim = (s.T @ indices)
         reps.append(rep)
         sims.append(sim)

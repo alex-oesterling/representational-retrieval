@@ -220,6 +220,8 @@ class UTKFace(torch.utils.data.Dataset):
             except:
                 continue
             self.imagepaths.append(path)
+        
+        self.labels = torch.tensor(self.labels)
 
     def __len__(self):
         return len(self.labels)
