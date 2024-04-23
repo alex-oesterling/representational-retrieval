@@ -4,6 +4,7 @@ import torchvision
 from PIL import Image
 import os
 import pandas as pd
+import glob
 
 class CelebA(torch.utils.data.Dataset):
     def __init__(self, path, attributes = None, train=True, transform=torchvision.transforms.ToTensor()):
@@ -110,7 +111,22 @@ class Occupations(torch.utils.data.Dataset):
         self.labels = []
 
         df = pd.read_csv(self.filepath + "gender_labelled_images.csv")
-        self.labels = df.image_gender
+        print(df.search_term) ## FIXME
+
+        occupation_to_idx = {}
+        for i, race in enumerate(df.search_term.unique()):
+            occupation_to_idx[race] = i
+
+        gender_to_idx = {
+            'man': 0,
+            'woman': 1
+        }
+
+        occupation_one_hot = torch.nn.functional.one_hot(torch.tensor([occupation_to_idx[occ] for occ in df.search_term]))
+
+        gender = torch.tensor([gender_to_idx[gen] for gen in df.image_gender])
+
+        self.labels = torch.tensor(torch.hstack([gender.unsqueeze(1), occupation_one_hot]))
 
         construct_path = lambda x, y: os.path.join(self.filepath, "google", str(x), str(y)+".jpg")
         img_paths = [construct_path(*x) for x in tuple(zip(df['search_term'], df['order']))]
@@ -186,22 +202,21 @@ class UTKFace(torch.utils.data.Dataset):
         self.imagepaths = []
         self.labels = []
 
-        # if train:
-        #     df = pd.read_csv(self.filepath + "fairface_label_train.csv")
-        # else:
-        #     df = pd.read_csv(self.filepath + "fairface_label_val.csv")
+        for path in glob.glob(os.path.join(self.filepath, "*/*.jpg")):
 
-        # self.labels = [list(x) for x in list(zip(df.gender, df.race, df.age))]
-
-        # construct_path = lambda x: os.path.join(self.filepath, x)
-        # img_paths = [construct_path(x) for x in df.file]
-
-        # for path in img_paths:
-        #     self.images.append(self.transform(Image.open(path)))
-        return
+            attributes = path.split("/")[-1].split("_")
+            # if len(attributes) < 3:
+            #     continue
+            # print(path.split("/")[-1])
+            # print(attributes)
+            try:
+                self.labels.append([int(attributes[0]), int(attributes[1]), int(attributes[2])])
+            except:
+                continue
+            self.imagepaths.append(path)
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        return self.images[idx], self.labels[idx]
+        return self.transform(Image.open(self.imagepaths[idx])), self.labels[idx]
