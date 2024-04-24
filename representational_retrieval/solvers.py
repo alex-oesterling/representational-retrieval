@@ -3,6 +3,9 @@ import cvxpy as cp
 from sklearn.linear_model import LinearRegression
 from .utils import statEmbedding
 
+import gurobipy as gp
+from gurobipy import GRB
+
 def oracle_function(indices, dataset, curation_set=None, model=None): ## FIXME
     if model is None:
         model = LinearRegression()
@@ -244,6 +247,90 @@ class GreedyOracle():
         alpha = (a_expanded/k - curation_indicator/self.m)
         self.model.fit(self.expanded_dataset, alpha)
         # return self.model
+    
+    def get_representation(self, indices, k):
+        self.sup_function(indices, k)
+        c = self.model.predict(self.dataset)
+        print("norm", np.linalg.norm(c), flush=True)
+        c /= np.linalg.norm(c)
+        rep = np.abs(np.sum((1/k)*indices*c-(1/self.m)*c))
+        return rep
+
+    def get_similarity(self, indices):
+        sim = indices.T@self.similarity_scores
+        return sim
+    
+class GurobiOracle():
+    def __init__(self, similarity_scores, dataset, curation_set=None, model=None):
+        self.m = similarity_scores.shape[0] ## FIXME
+        self.d = dataset.shape[1]
+
+        # self.a = cp.Variable(self.m)
+        # self.y = cp.Variable(self.d)
+        # self.rho = cp.Parameter(nonneg=True) #similarity value
+        self.dataset = dataset
+
+        if curation_set is None: ## If no curation set is provided, compute MPR over the retrieval set
+            self.curation_set = self.dataset
+        else:
+            self.curation_set = curation_set
+
+        self.expanded_dataset = np.concatenate((self.dataset, self.curation_set), axis=0)
+
+        self.similarity_scores = similarity_scores
+
+        if model is None:
+            self.model = LinearRegression()
+        else:
+            self.model = model
+
+        
+
+    def fit(self, k, num_iter, rho):
+        self.problem = gp.Model("mixed_integer_optimization")
+        self.a = self.problem.addVars(self.m, vtype=GRB.BINARY, name="a")
+        print(self.similarity_scores)
+        print(self.a)
+        obj = gp.quicksum(self.similarity_scores[i,0]*self.a[i] for i in range(self.m))
+        self.problem.setObjective(obj, sense=GRB.MAXIMIZE)
+        self.problem.addConstr(sum(self.a) == k, "constraint_sum_a")
+        self.problem.optimize()
+        # self.objective = cp.Maximize(self.similarity_scores.T @ self.a)
+        # self.constraints = [sum(self.a)==k, 0<=self.a, self.a<=1]
+        # self.prob = cp.Problem(self.objective, self.constraints)
+        # self.prob.solve(solver=cp.ECOS,warm_start=True)
+        # reps = []
+        # sims = []
+        for index in range(num_iter):
+            gurobi_solution = np.array([self.a[i].x for i in range(self.a.shape[0])])
+            self.sup_function(gurobi_solution, k)
+            c = self.model.predict(self.expanded_dataset)
+            c /= np.linalg.norm(c)
+
+            retrieval_size = self.dataset.shape[0]
+            if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
+                print("constraints satisfied, exiting early")
+                print("\t", np.abs(np.sum((1/k)*self.a.value*c-(1/self.m)*c)))
+                print("\t", rho)
+                break
+            self.max_similarity(c, k, rho, index)
+        gurobi_solution = np.array([self.a[i].x for i in range(self.a.shape[0])])
+        return gurobi_solution
+
+
+    def max_similarity(self, c, k, rho, linear_constraint_index):
+        retrieval_size = self.dataset.shape[0]
+        sum_a_c = gp.quicksum(self.a[i] * c[:retrieval_size][i] for i in range(self.a.shape[0]))
+        sum_c = gp.quicksum(c[retrieval_size:])
+        self.problem.addConstr(abs((1/k)*sum_a_c - (1/self.m)*sum_c) < rho, name="linear_constraint_{}".format(linear_constraint_index))
+        self.problem.optimize()
+        print(self.problem.objVal)
+
+    def sup_function(self, a, k):
+        curation_indicator = np.concatenate((np.zeros(self.dataset.shape[0]), np.ones(self.curation_set.shape[0])))
+        a_expanded = np.concatenate((a, np.zeros(self.curation_set.shape[0])))
+        alpha = (a_expanded/k - curation_indicator/self.m)
+        self.model.fit(self.expanded_dataset, alpha)
     
     def get_representation(self, indices, k):
         self.sup_function(indices, k)
