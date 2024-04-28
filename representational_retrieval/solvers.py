@@ -1,7 +1,7 @@
 import numpy as np
 import cvxpy as cp
 from sklearn.linear_model import LinearRegression
-from .utils import statEmbedding, fon
+from .utils import statEmbedding, fon, getMPR
 import random
 import gurobipy as gp
 from gurobipy import GRB
@@ -444,4 +444,44 @@ class PBM():
         indices[selections] = 1    
         AssertionError(np.sum(indices)==k)
         return indices, selections
+
+# MMR algorithm (greedy) with MPR as the diversity metric
+class MMR_MPR():
+    def __init__(self, similarity_scores, labels, features):
+        self.m = similarity_scores.shape[0]
+        self.similarity_scores = similarity_scores
+        # define what embedding to use for the diversity metric.
+        # None (img itself), CLIP, or CLIP+PCA
+        self.embeddings = features # the entire dataset (also used for retrieval), or a separate curation set
+        self.mean_embedding = None
+        self.std_embedding = None
+        self.labels = labels
+
+    def fit(self, k, lambda_, oracle):
+        if self.mean_embedding is None or self.std_embedding is None:
+            self.mean_embedding, self.std_embedding =  statEmbedding(self.embeddings)
+
+        indices = np.zeros(self.m)
+        selection = []
+        for i in range(k):
+            MMR_temp = np.full(len(self.embeddings), -np.inf)
+            if i==0:
+                idx = np.argmax(self.similarity_scores)
+                selection.append(idx)
+                indices[idx] = 1
+                continue
+            for j in range(len(self.embeddings)):
+                if indices[j] == 1:
+                    continue
+                # temporary select the jth element
+                indices[j] = 1
+                rep = getMPR(indices, self.labels, oracle, k, self.m)
+                MMR_temp[j] = (1-lambda_)* self.similarity_scores.T @ indices + lambda_ * rep
+                indices[j] = 0
+            # select the element with the highest MMR 
+            idx = np.argmax(MMR_temp)
+            selection.append(idx)
+            indices[np.argmax(MMR_temp)] = 1
+        AssertionError(np.sum(indices)==k)
+        return indices, selection
 

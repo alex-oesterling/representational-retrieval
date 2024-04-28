@@ -54,6 +54,7 @@ def main():
 
     batch_size = 512
 
+    # save features and labels
     dataset_path = "/n/holylabs/LABS/calmon_lab/Lab/datasets/"
     if usingclip and args.dataset+'_clipfeatures.npy' in os.listdir(dataset_path):
         print("clip features, labels already processed")
@@ -133,6 +134,30 @@ def main():
         results['selection'] = selection_list
         results['MMR_cost'] = MMR_cost_list
     
+    elif args.method == "mmr_mpr":
+        solver = MMR_MPR(s, labels, features)
+        lambdas = np.linspace(0, 1-1e-5, 20)
+        
+        reps = []
+        sims = []
+        indices_list = []
+        selection_list = []
+        for p in tqdm(lambdas):
+            indices, selection = solver.fit(args.k, p, oracle) 
+            rep = getMPR(indices, labels, oracle, args.k, m)
+            sim = (s.T @ indices)
+            reps.append(rep)
+            sims.append(sim)
+            indices_list.append(indices)
+            selection_list.append(selection)
+
+        results['MPR'] = reps
+        results['sims'] = sims
+        results['indices'] = indices_list
+        results['lambdas'] = lambdas
+        results['selection'] = selection_list
+
+
     elif args.method == "debiasclip":
         # return top k similarities
         top_indices = np.zeros(m)
@@ -148,7 +173,7 @@ def main():
         results['MPR'] = reps
     
     elif args.method == "clipclip":
-        # get the order of columns to drop to reduce MI with sensitive attributes
+        # get the order of columns to drop to reduce MI with sensitive attributes (support intersectional groups)
         sensitive_attributes_idx = [dataset.attr_to_idx['Male']]
         gender_MI_order = return_feature_MI_order(features, labels, sensitive_attributes_idx)
         # run clipclip method
