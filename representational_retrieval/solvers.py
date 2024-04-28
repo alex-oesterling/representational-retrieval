@@ -1,8 +1,8 @@
 import numpy as np
 import cvxpy as cp
 from sklearn.linear_model import LinearRegression
-from .utils import statEmbedding
-
+from .utils import statEmbedding, fon
+import random
 import gurobipy as gp
 from gurobipy import GRB
 
@@ -294,7 +294,8 @@ class GurobiOracle():
         obj = gp.quicksum(self.similarity_scores[i,0]*self.a[i] for i in range(self.m))
         self.problem.setObjective(obj, sense=GRB.MAXIMIZE)
         self.problem.addConstr(sum(self.a) == k, "constraint_sum_a")
-        self.problem.optimize()
+        # self.problem.optimize()
+       
         # self.objective = cp.Maximize(self.similarity_scores.T @ self.a)
         # self.constraints = [sum(self.a)==k, 0<=self.a, self.a<=1]
         # self.prob = cp.Problem(self.objective, self.constraints)
@@ -302,32 +303,43 @@ class GurobiOracle():
         # reps = []
         # sims = []
         for index in range(num_iter):
-            gurobi_solution = np.array([self.a[i].x for i in range(self.a.shape[0])])
+            if index == 0:
+                # top k similarity
+                gurobi_solution = np.zeros(self.m)
+                gurobi_solution[np.argsort(self.similarity_scores.squeeze())[::-1][:k]] = 1
+            else:
+                print(index)
+                print(len(self.a))
+                #gurobi_solution = np.array([self.a[i].x for i in range(self.a.shape[0])])
+                gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
             self.sup_function(gurobi_solution, k)
             c = self.model.predict(self.expanded_dataset)
             c /= np.linalg.norm(c)
 
             retrieval_size = self.dataset.shape[0]
-            if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
+            
+            if np.abs(np.sum((gurobi_solution/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
+            #if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
                 print("constraints satisfied, exiting early")
                 print("\t", np.abs(np.sum((1/k)*self.a.value*c-(1/self.m)*c)))
                 print("\t", rho)
                 break
             self.max_similarity(c, k, rho, index)
-        gurobi_solution = np.array([self.a[i].x for i in range(self.a.shape[0])])
+        gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
         return gurobi_solution
 
 
     def max_similarity(self, c, k, rho, linear_constraint_index):
         retrieval_size = self.dataset.shape[0]
-        sum_a_c = gp.quicksum(self.a[i] * c[:retrieval_size][i] for i in range(self.a.shape[0]))
+        sum_a_c = gp.quicksum(self.a[i] * c[:retrieval_size][i] for i in range(len(self.a)))
         sum_c = gp.quicksum(c[retrieval_size:])
-        self.problem.addConstr(abs((1/k)*sum_a_c - (1/self.m)*sum_c) < rho, name="linear_constraint_{}".format(linear_constraint_index))
+        self.problem.addConstr(((1/k)*sum_a_c - (1/self.m)*sum_c) <= rho, name="linear_constraint_{}".format(linear_constraint_index))
+        self.problem.addConstr(((1/k)*sum_a_c - (1/self.m)*sum_c) >= -rho, name="neg_linear_constraint_{}".format(linear_constraint_index))
         self.problem.optimize()
-        print(self.problem.objVal)
+        print(self.problem.ObjVal)
 
     def sup_function(self, a, k):
-        curation_indicator = np.concatenate((np.zeros(self.dataset.shape[0]), np.ones(self.curation_set.shape[0])))
+        curation_indicator = np.concatenate((np.zeros(a.shape[0]), np.ones(self.curation_set.shape[0])))
         a_expanded = np.concatenate((a, np.zeros(self.curation_set.shape[0])))
         alpha = (a_expanded/k - curation_indicator/self.m)
         self.model.fit(self.expanded_dataset, alpha)
@@ -350,15 +362,18 @@ class ClipClip():
         self.features = features
         self.device = device
         self.m = features.shape[0]
-        if orderings:
-            self.orderings = orderings
+        self.orderings = orderings
 
     def fit(self, k, num_cols_to_drop, query_embedding):
-        clip_features = torch.index_select(self.features, 1, torch.tensor(self.orderings[num_cols_to_drop:]).to(self.device))
-        clip_query = torch.index_select(query_embedding, 1, torch.tensor(self.orderings[num_cols_to_drop:]).to(self.device))
+
+        clip_features = self.features[:, self.orderings[num_cols_to_drop:]]
+        clip_query = query_embedding[:, self.orderings[num_cols_to_drop:]]
+        # clip_features = torch.index_select(torch.tensor(self.features), 1, torch.tensor(self.orderings[num_cols_to_drop:].copy()).to(self.device))
+        # clip_query = torch.index_select(torch.tensor(query_embedding), 1, torch.tensor(self.orderings[num_cols_to_drop:].copy()).to(self.device))
 
         similarities = (clip_features @ clip_query.T).flatten()
-        selections = similarities.argsort(descending=True).cpu().flatten()[:k]
+        selections = np.argsort(similarities.squeeze())[::-1][:k]
+        #selections = similarities.argsort(descending=True).cpu().flatten()[:k]
         indices = np.zeros(self.m)
         indices[selections] = 1    
         AssertionError(np.sum(indices)==k)
@@ -366,35 +381,35 @@ class ClipClip():
 
 class PBM():
     ## As defined in the paper "Mitigating Test-Time Bias for Fair Image Retrieval" (Kong et. al. 2023)
-    def __init__(self, features, similarity_scores, pbm_labels, pbm_classes):
+    def __init__(self, features, similarities, pbm_labels, pbm_classes):
         self.features = features
-        self.similarity_scores = similarity_scores
+        self.similarities = similarities
         self.m = features.shape[0]
         self.pbm_label = pbm_labels # predicted sensitive group label
         self.pbm_classes = pbm_classes
 
     def fit(self, k=10, eps=0):
-        
-        best = self.similarity_scores.argsort(descending=True).cpu().numpy().flatten()
-        np_sim = self.similarity_scores.cpu().numpy()
+        selections = np.argsort(self.similarities.squeeze())[::-1][:k]
+        #best = self.similarity_scores.argsort(descending=True).cpu().numpy().flatten()
+        #np_sim = self.similarity_scores.cpu().numpy()
 
         selections = []
 
-        neutrals = [x for x in best if self.pbm_label[x] == 0]
-        classes = [[x for x in best if self.pbm_label[x]== i] for i in range(1, len(self.pbm_classes))]
+        neutrals = [x for x in selections if self.pbm_label[x] == 0]
+        classes = [[x for x in selections if self.pbm_label[x]== i] for i in range(1, len(self.pbm_classes))]
 
     
         while len(selections) < k:
             if random.random() < eps:
                 try:
-                    neutral_sim = np_sim[neutrals[0]]
+                    neutral_sim = self.similarities[neutrals[0]]
                 except:
                     neutral_sim = -1
                 
                 max_class, idx = 0, 0
                 for i, c in enumerate(classes):
                     try:
-                        class_sim = np_sim[c[0]]
+                        class_sim = self.similarities[c[0]]
                     except:
                         class_sim = -1
                     if class_sim > max_class:
@@ -412,7 +427,7 @@ class PBM():
                 best_for_classes = [fon(c) for c in classes]
                 best_for_classes_vals = [c for c in best_for_classes if c is not None]
 
-                similarities_for_classes = [np_sim[x] for x in best_for_classes_vals]
+                similarities_for_classes = [self.similarities[x] for x in best_for_classes_vals]
                 avg_sim = np.mean(similarities_for_classes)
                 neutral_sim = self.similarity_scores[best_neutral]
 
