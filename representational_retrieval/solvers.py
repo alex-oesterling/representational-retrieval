@@ -389,14 +389,11 @@ class PBM():
         self.pbm_classes = pbm_classes
 
     def fit(self, k=10, eps=0):
-        selections = np.argsort(self.similarities.squeeze())[::-1][:k]
-        #best = self.similarity_scores.argsort(descending=True).cpu().numpy().flatten()
-        #np_sim = self.similarity_scores.cpu().numpy()
-
+        similarities_sorted = np.argsort(self.similarities.squeeze())[::-1]
         selections = []
 
-        neutrals = [x for x in selections if self.pbm_label[x] == 0]
-        classes = [[x for x in selections if self.pbm_label[x]== i] for i in range(1, len(self.pbm_classes))]
+        neutrals = [x for x in similarities_sorted if self.pbm_label[x] == 0]
+        classes = [[x for x in similarities_sorted if self.pbm_label[x]== i] for i in range(1, len(self.pbm_classes))]
 
     
         while len(selections) < k:
@@ -429,7 +426,7 @@ class PBM():
 
                 similarities_for_classes = [self.similarities[x] for x in best_for_classes_vals]
                 avg_sim = np.mean(similarities_for_classes)
-                neutral_sim = self.similarity_scores[best_neutral]
+                neutral_sim = self.similarities[best_neutral]
 
                 if avg_sim > neutral_sim:
                     if len(selections) + len(best_for_classes_vals) > k:

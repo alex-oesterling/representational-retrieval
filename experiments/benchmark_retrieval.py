@@ -24,10 +24,12 @@ def main():
     parser.add_argument('-functionclass', default="linearregression", type=str)
     args = parser.parse_args()
 
-    if args.method is not "debiasclip":
+    if args.method != "debiasclip":
+        usingclip = True
         model, preprocess = clip.load("ViT-B/32", device=args.device)
     else:
-        model, preprocess = dclip.load("ViT-B/16-gender", device = args.device) # DebiasClip for gender, the only publicly available model
+        usingclip = False
+        model, preprocess = dclip.load("ViT-B/16-gender", device =args.device) # DebiasClip for gender, the only publicly available model
 
     # Load the dataset
     if args.dataset == "fairface":
@@ -50,26 +52,48 @@ def main():
 
     batch_size = 512
 
-    all_features = []
-    all_labels = []
-    ix = 0
-    with torch.no_grad():
-        for images, labels in tqdm(DataLoader(dataset, batch_size=batch_size)):
-            features = model.encode_image(images.to(args.device))
+    dataset_path = "/n/holylabs/LABS/calmon_lab/Lab/datasets/"
+    if usingclip and args.dataset+'_clipfeatures.npy' in os.listdir(dataset_path):
+        print("clip features, labels already processed")
+        features = np.load(dataset_path+args.dataset+'_clipfeatures.npy')
+        labels = np.load(dataset_path+args.dataset+'_cliplabels.npy')
+    elif not usingclip and args.dataset+'_dclipFeatures.npy' in os.listdir(dataset_path):
+        print("dclip features, labels already processed")
+        features = np.load(dataset_path+args.dataset+'_dclipFeatures.npy')
+        labels = np.load(dataset_path+args.dataset+'_dclipLabels.npy')
+    else:
+        all_features = []
+        all_labels = []
+        ix = 0
+        with torch.no_grad():
+            for images, labels in tqdm(DataLoader(dataset, batch_size=batch_size)):
+                features = model.encode_image(images.to(args.device))
 
-            all_features.append(features)
-            all_labels.append(labels)
+                all_features.append(features)
+                all_labels.append(labels)
 
-            ix += batch_size
-            if ix>=args.n_samples:
-                break
+                ix += batch_size
+                if ix>=args.n_samples:
+                    break
 
-    features, labels = torch.cat(all_features).cpu().numpy(), torch.cat(all_labels).cpu().numpy()
+        features, labels = torch.cat(all_features).cpu().numpy(), torch.cat(all_labels).cpu().numpy()
+        if usingclip:
+            np.save(dataset_path+ args.dataset+'_clipfeatures.npy', features)
+            np.save(dataset_path+ args.dataset+'_cliplabels.npy', labels)
+        else:
+            np.save(dataset_path+ args.dataset+'_dclipFeatures.npy', features)
+            np.save(dataset_path+ args.dataset+'_dclipLabels.npy', labels)       
+
     m = labels.shape[0]
 
     q = args.query
 
     q_token = clip.tokenize(q).to(args.device)
+
+    # ensure on the same device
+    model = model.to(args.device)
+    q_token = q_token.to(args.device)
+
     with torch.no_grad():
         q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
     q_emb = q_emb/np.linalg.norm(q_emb)
@@ -114,22 +138,21 @@ def main():
         top_indices[selection] = 1
         sims = s.T@top_indices
 
-        rep = getMPR(top_indices, labels, oracle, args.k, m)
+        reps = getMPR(top_indices, labels, oracle, args.k, m)
         AssertionError(np.sum(top_indices)==args.k)
         results['sims'] = sims
         results['selection'] = selection
         results['indices'] = top_indices
-        results['MPR'] = rep
+        results['MPR'] = reps
     
     elif args.method == "clipclip":
         # get the order of columns to drop to reduce MI with sensitive attributes
-        MIfeatures = features
-        MIclip_training = labels
-        gender_MI_order = return_feature_MI_order(MIfeatures, MIclip_training, ['Male'])
+        sensitive_attributes_idx = [dataset.attr_to_idx['Male']]
+        gender_MI_order = return_feature_MI_order(features, labels, sensitive_attributes_idx)
         # run clipclip method
         solver = ClipClip(features, gender_MI_order, args.device)
 
-        cols_drop = list(range(1, 400, 20))
+        cols_drop = list(range(1, 400, 10))
         reps = []
         sims = []
         indices_list = []
@@ -150,7 +173,7 @@ def main():
         results['lambdas'] = cols_drop # number of columns dropped
         results['selection'] = selection_list
 
-    elif args.method == "PBM":
+    elif args.method == "pbm":
         pbm_classes = [0, 1, 2] # correspond to predicted sensitive attribute being [Neutral/Uncertain, Male, Female]. 
         classes = ["Neither male nor female", "Male", "Female"]
         class_embeddings = []
@@ -159,9 +182,10 @@ def main():
             with torch.no_grad():
                 class_emb = model.encode_text(class_token).cpu().numpy().astype(np.float64)
             class_embeddings.append(class_emb/np.linalg.norm(class_emb))
-        pbm_labels = features @ np.array(class_embeddings).T
+        pbm_labels = features @ (np.array(class_embeddings).squeeze().T)
         # select the highest value as predicted labels
         pbm_labels = np.argmax(pbm_labels, axis=1)
+        print(np.unique(pbm_labels, return_counts=True))
 
         solver = PBM(features, s, pbm_labels, pbm_classes)
         lambdas = np.linspace(1e-5, 1-1e-5, 50)
@@ -182,7 +206,7 @@ def main():
         results['MPR'] = reps
         results['sims'] = sims
         results['indices'] = indices_list
-        results['lambdas'] = cols_drop # number of columns dropped
+        results['lambdas'] = lambdas 
         results['selection'] = selection_list
 
 
@@ -197,6 +221,6 @@ def main():
     plt.plot(reps, sims, label="Binary")
     plt.xlabel('Representation')
     plt.ylabel('Similarity')
-    plt.savefig("./results/mmr_rep_sim.png")
+    plt.savefig("./results/carol/mmr_rep_sim.png")
 if __name__ == "__main__":
     main()

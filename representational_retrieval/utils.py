@@ -74,13 +74,11 @@ def calc_feature_MI(features, labels, n_neighbors = 10, rs=1):
     return fs.mutual_info_classif(features, labels, discrete_features=False, copy=True, n_neighbors=n_neighbors, random_state=rs)
 
 def return_feature_MI_order(features, data, sensitive_attributes, n_neighbors = 10, rs=1):
-    labels = data[sensitive_attributes].apply(lambda x: ' '.join(x), axis=1) 
-    print(labels)
+    labels_arr = np.reshape(data[:,sensitive_attributes], (-1, len(sensitive_attributes))) # enable intersectional groups
+    labels = np.array([' '.join(map(str, row)) for row in labels_arr])
     feature_MI = calc_feature_MI(features, labels, n_neighbors, rs)
-    print(feature_MI)
     feature_order = np.argsort(feature_MI)[::-1]
-    print(feature_MI[feature_order])
-    return 
+    return feature_order
 
 # for PBM
 def fon(l):
