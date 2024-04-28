@@ -33,9 +33,11 @@ def main():
 
     # Load the dataset
     if args.dataset == "fairface":
-        pass
+        dataset = FairFace("/n/holylabs/LABS/calmon_lab/Lab/datasets/", train=True, transform=preprocess)
     elif args.dataset == "occupations":
-        pass
+        dataset = Occupations("/n/holylabs/LABS/calmon_lab/Lab/datasets/", transform=preprocess)
+    elif args.dataset == "utkface":
+        dataset = UTKFace("/n/holylabs/LABS/calmon_lab/Lab/datasets/", transform=preprocess)
     elif args.dataset == "celeba":
         dataset = CelebA("/n/holylabs/LABS/calmon_lab/Lab/datasets/", attributes=None, train=True, transform=preprocess)
     else:
@@ -206,7 +208,7 @@ def main():
         results['MPR'] = reps
         results['sims'] = sims
         results['indices'] = indices_list
-        results['lambdas'] = lambdas 
+        results['lambdas'] = lambdas #control amt of intervention. eps = .5 means half the time you take a PBM step, half the time you take a greedy one
         results['selection'] = selection_list
 
 
