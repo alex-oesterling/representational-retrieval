@@ -42,7 +42,7 @@ def compute_mpr(indices, dataset, curation_set=None, model=None):
     
     return mpr
 
-class CVXPY():
+class BoundedLinearModels():
     def __init__(self, similarity_scores, labels):
         m = similarity_scores.shape[0]
         d = labels.shape[1]
@@ -190,10 +190,11 @@ class MMR():
 # minimize MSE of a regression problem
 class GreedyOracle():
     def __init__(self, similarity_scores, dataset, curation_set=None, model=None):
-        self.m = similarity_scores.shape[0]
+        self.n = dataset.shape[0]
         self.d = dataset.shape[1]
 
-        self.a = cp.Variable(self.m)
+
+        self.a = cp.Variable(self.n)
         self.y = cp.Variable(self.d)
         self.rho = cp.Parameter(nonneg=True) #similarity value
         self.dataset = dataset
@@ -202,7 +203,8 @@ class GreedyOracle():
             self.curation_set = self.dataset
         else:
             self.curation_set = curation_set
-
+        
+        self.m = self.curation_set.shape[0]
         self.expanded_dataset = np.concatenate((self.dataset, self.curation_set), axis=0)
 
         self.similarity_scores = similarity_scores
@@ -224,10 +226,9 @@ class GreedyOracle():
             c = self.model.predict(self.expanded_dataset)
             c /= np.linalg.norm(c)
 
-            retrieval_size = self.dataset.shape[0]
-            if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
+            if np.abs(np.sum((self.a.value/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:])) <= rho:
                 print("constraints satisfied, exiting early")
-                print("\t", np.abs(np.sum((1/k)*self.a.value*c-(1/self.m)*c)))
+                print("\t", np.abs(np.sum((self.a.value/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:])))
                 print("\t", rho)
                 break
             self.max_similarity(c, k, rho)
@@ -236,8 +237,7 @@ class GreedyOracle():
 
 
     def max_similarity(self, c, k, rho):
-        retrieval_size = self.dataset.shape[0]
-        self.constraints.append(cp.abs(cp.sum((1/k)*cp.multiply(self.a, c[:retrieval_size])-(1/self.m)*c[retrieval_size:]))<=rho)
+        self.constraints.append(cp.abs(cp.sum((1/k)*cp.multiply(self.a, c[:self.n]))-cp.sum((1/self.m)*c[self.n:]))<=rho)
         self.prob = cp.Problem(self.objective, self.constraints)
         self.prob.solve(solver=cp.ECOS,warm_start=True)
 
@@ -253,7 +253,7 @@ class GreedyOracle():
         c = self.model.predict(self.dataset)
         print("norm", np.linalg.norm(c), flush=True)
         c /= np.linalg.norm(c)
-        rep = np.abs(np.sum((1/k)*indices*c-(1/self.m)*c))
+        rep = np.abs(np.sum((self.a.value/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:]))
         return rep
 
     def get_similarity(self, indices):
@@ -262,6 +262,7 @@ class GreedyOracle():
     
 class GurobiOracle():
     def __init__(self, similarity_scores, dataset, curation_set=None, model=None):
+        print("using Gurobi...")
         self.m = similarity_scores.shape[0] ## FIXME
         self.d = dataset.shape[1]
 
@@ -321,7 +322,7 @@ class GurobiOracle():
             if np.abs(np.sum((gurobi_solution/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
             #if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
                 print("constraints satisfied, exiting early")
-                print("\t", np.abs(np.sum((1/k)*self.a.value*c-(1/self.m)*c)))
+                print("\t", np.abs(np.sum((gurobi_solution/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])))
                 print("\t", rho)
                 break
             self.max_similarity(c, k, rho, index)

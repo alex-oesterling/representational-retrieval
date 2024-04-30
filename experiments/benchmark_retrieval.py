@@ -18,7 +18,9 @@ def main():
     parser.add_argument('-method', default="mmr", type=str)
     parser.add_argument('-device', default="cuda", type=str)
     parser.add_argument('-dataset', default="celeba", type=str)
+    parser.add_argument('-curation_dataset', default="celeba", type=str)
     parser.add_argument('-n_samples', default=10000, type=int)
+    parser.add_argument('-n_curation_samples', default=10000, type=int)
     parser.add_argument('-query', default="A photo of a CEO", type=str)
     parser.add_argument('-k', default=10, type=int)
     parser.add_argument('-functionclass', default="linearregression", type=str)
@@ -42,6 +44,18 @@ def main():
         dataset = CelebA("/n/holylabs/LABS/calmon_lab/Lab/datasets/", attributes=None, train=True, transform=preprocess)
     else:
         print("Dataset not supported!")
+        exit()
+
+    if args.curation_set == "fairface":
+        curation_set = FairFace("/n/holylabs/LABS/calmon_lab/Lab/datasets/", train=True, transform=preprocess)
+    elif args.curation_set == "occupations":
+        curation_set = Occupations("/n/holylabs/LABS/calmon_lab/Lab/datasets/", transform=preprocess)
+    elif args.curation_set == "utkface":
+        curation_set = UTKFace("/n/holylabs/LABS/calmon_lab/Lab/datasets/", transform=preprocess)
+    elif args.curation_set == "celeba":
+        curation_set = CelebA("/n/holylabs/LABS/calmon_lab/Lab/datasets/", attributes=None, train=True, transform=preprocess)
+    else:
+        print("Curation set not supported!")
         exit()
 
     if args.functionclass == "randomforest":
