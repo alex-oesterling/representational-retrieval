@@ -56,14 +56,14 @@ def main():
 
     # save features and labels
     dataset_path = "/n/holylabs/LABS/calmon_lab/Lab/datasets/"
-    if usingclip and args.dataset+'_clipfeatures.npy' in os.listdir(dataset_path):
+    if usingclip and args.dataset+'_clipfeatures_{}.npy'.format(args.n_samples) in os.listdir(dataset_path):
         print("clip features, labels already processed")
-        features = np.load(dataset_path+args.dataset+'_clipfeatures.npy')
-        labels = np.load(dataset_path+args.dataset+'_cliplabels.npy')
-    elif not usingclip and args.dataset+'_dclipFeatures.npy' in os.listdir(dataset_path):
+        features = np.load(dataset_path+args.dataset+'_clipfeatures_{}.npy'.format(args.n_samples))
+        labels = np.load(dataset_path+args.dataset+'_cliplabels_{}.npy'.format(args.n_samples))
+    elif not usingclip and args.dataset+'_dclipFeatures_{}.npy'.format(args.n_samples) in os.listdir(dataset_path):
         print("dclip features, labels already processed")
-        features = np.load(dataset_path+args.dataset+'_dclipFeatures.npy')
-        labels = np.load(dataset_path+args.dataset+'_dclipLabels.npy')
+        features = np.load(dataset_path+args.dataset+'_dclipFeatures_{}.npy'.format(args.n_samples))
+        labels = np.load(dataset_path+args.dataset+'_dclipLabels_{}.npy'.format(args.n_samples))
     else:
         all_features = []
         all_labels = []
@@ -81,11 +81,11 @@ def main():
 
         features, labels = torch.cat(all_features).cpu().numpy(), torch.cat(all_labels).cpu().numpy()
         if usingclip:
-            np.save(dataset_path+ args.dataset+'_clipfeatures.npy', features)
-            np.save(dataset_path+ args.dataset+'_cliplabels.npy', labels)
+            np.save(dataset_path+ args.dataset+'_clipfeatures_{}.npy'.format(args.n_samples), features)
+            np.save(dataset_path+ args.dataset+'_cliplabels_{}.npy'.format(args.n_samples), labels)
         else:
-            np.save(dataset_path+ args.dataset+'_dclipFeatures.npy', features)
-            np.save(dataset_path+ args.dataset+'_dclipLabels.npy', labels)       
+            np.save(dataset_path+ args.dataset+'_dclipFeatures_{}.npy'.format(args.n_samples), features)
+            np.save(dataset_path+ args.dataset+'_dclipLabels_{}.npy'.format(args.n_samples), labels)       
 
     m = labels.shape[0]
 
@@ -237,7 +237,7 @@ def main():
         results['selection'] = selection_list
 
 
-    result_path = './results/carol/'
+    result_path = './results/alex/'
     filename_pkl = "{}_{}_{}_{}.pkl".format(args.dataset, args.method, args.k, args.functionclass)
     if not os.path.exists(result_path):
         os.makedirs(result_path)
@@ -248,6 +248,6 @@ def main():
     plt.plot(reps, sims, label="Binary")
     plt.xlabel('Representation')
     plt.ylabel('Similarity')
-    plt.savefig("./results/carol/mmr_rep_sim.png")
+    plt.savefig("./results/alex/mmr_rep_sim.png")
 if __name__ == "__main__":
     main()
