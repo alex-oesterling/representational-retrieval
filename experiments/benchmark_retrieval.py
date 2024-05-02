@@ -315,7 +315,10 @@ def main():
         elif args.method == "clipclip":
             # get the order of columns to drop to reduce MI with sensitive attributes (support intersectional groups)
             sensitive_attributes_idx = [dataset.attr_to_idx['Male']]
-            gender_MI_order = return_feature_MI_order(retrieval_features, retrieval_labels, sensitive_attributes_idx)
+            if curation_dataset is not None:
+                gender_MI_oder = return_feature_MI_order(curation_features, curation_labels, sensitive_attributes_idx)
+            else:
+                gender_MI_order = return_feature_MI_order(retrieval_features, retrieval_labels, sensitive_attributes_idx)
             # run clipclip method
             solver = ClipClip(retrieval_features, gender_MI_order, args.device)
 
