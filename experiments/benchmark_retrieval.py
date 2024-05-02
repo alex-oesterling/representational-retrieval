@@ -122,7 +122,20 @@ def main():
     else:
         curation_features = None
         curation_labels = None
-    
+
+    # dataset_path = "/n/holylabs/LABS/calmon_lab/Lab/datasets/"
+    # if usingclip and args.dataset+'_normalized_clipfeatures_{}.npy'.format(args.n_samples) in os.listdir(dataset_path):
+    #     print("normalized clip features, labels already processed")
+    #     features = np.load(dataset_path+args.dataset+'_normalized_clipfeatures_{}.npy'.format(args.n_samples))
+    #     labels = np.load(dataset_path+args.dataset+'_cliplabels_{}.npy'.format(args.n_samples))
+    # elif not usingclip and args.dataset+'_normalized_dclipFeatures_{}.npy'.format(args.n_samples) in os.listdir(dataset_path):
+    #     print("normalized dclip features, labels already processed")
+    #     features = np.load(dataset_path+args.dataset+'_normalized_dclipFeatures_{}.npy'.format(args.n_samples))
+    #     labels = np.load(dataset_path+args.dataset+'_dclipLabels_{}.npy'.format(args.n_samples))
+    # else:
+    #     all_features = []
+    #     all_labels = []
+
     n = retrieval_labels.shape[0]
 
     with open(args.query, 'r') as f:
