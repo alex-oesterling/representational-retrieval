@@ -5,6 +5,7 @@ from .utils import statEmbedding, fon, getMPR
 import random
 import gurobipy as gp
 from gurobipy import GRB
+from tqdm.auto import tqdm
 
 def oracle_function(indices, dataset, curation_set=None, model=None): ## FIXME
     if model is None:
@@ -260,25 +261,22 @@ class GreedyOracle():
         sim = indices.T@self.similarity_scores
         return sim
     
-class GurobiOracle():
+class GurobiIP():
     def __init__(self, similarity_scores, dataset, curation_set=None, model=None):
         print("using Gurobi...")
-        self.m = similarity_scores.shape[0] ## FIXME
+        self.n = dataset.shape[0]
         self.d = dataset.shape[1]
-
-        # self.a = cp.Variable(self.m)
-        # self.y = cp.Variable(self.d)
-        # self.rho = cp.Parameter(nonneg=True) #similarity value
         self.dataset = dataset
 
         if curation_set is None: ## If no curation set is provided, compute MPR over the retrieval set
             self.curation_set = self.dataset
         else:
             self.curation_set = curation_set
+        self.m = self.curation_set.shape[0]
 
         self.expanded_dataset = np.concatenate((self.dataset, self.curation_set), axis=0)
 
-        self.similarity_scores = similarity_scores
+        self.similarity_scores = similarity_scores.squeeze()
 
         if model is None:
             self.model = LinearRegression()
@@ -290,54 +288,126 @@ class GurobiOracle():
     def fit(self, k, num_iter, rho):
         self.problem = gp.Model("mixed_integer_optimization")
         self.a = self.problem.addVars(self.m, vtype=GRB.BINARY, name="a")
-        print(self.similarity_scores)
-        print(self.a)
-        obj = gp.quicksum(self.similarity_scores[i,0]*self.a[i] for i in range(self.m))
+        print("Warm start?", self.problem.Params.LPWarmStart)
+        obj = gp.quicksum(self.similarity_scores[i]*self.a[i] for i in range(self.m))
         self.problem.setObjective(obj, sense=GRB.MAXIMIZE)
-        self.problem.addConstr(sum(self.a) == k, "constraint_sum_a")
-        # self.problem.optimize()
+        self.problem.addConstr(sum([self.a[i] for i in range(self.m)]) == k, "constraint_sum_a")
+        self.problem.optimize()
        
-        # self.objective = cp.Maximize(self.similarity_scores.T @ self.a)
-        # self.constraints = [sum(self.a)==k, 0<=self.a, self.a<=1]
-        # self.prob = cp.Problem(self.objective, self.constraints)
-        # self.prob.solve(solver=cp.ECOS,warm_start=True)
-        # reps = []
-        # sims = []
-        for index in range(num_iter):
-            if index == 0:
-                # top k similarity
-                gurobi_solution = np.zeros(self.m)
-                gurobi_solution[np.argsort(self.similarity_scores.squeeze())[::-1][:k]] = 1
-            else:
-                print(index)
-                print(len(self.a))
-                #gurobi_solution = np.array([self.a[i].x for i in range(self.a.shape[0])])
-                gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
+        for index in tqdm(range(num_iter)):
+            gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
             self.sup_function(gurobi_solution, k)
             c = self.model.predict(self.expanded_dataset)
             c /= np.linalg.norm(c)
-
-            retrieval_size = self.dataset.shape[0]
             
-            if np.abs(np.sum((gurobi_solution/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
+            if np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:])) < rho:
             #if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
                 print("constraints satisfied, exiting early")
-                print("\t", np.abs(np.sum((gurobi_solution/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])))
+                print("\t", np.abs(np.sum((gurobi_solution/k)*c[self.n:])-np.sum((1/self.m)*c[self.n:])))
                 print("\t", rho)
                 break
+            
             self.max_similarity(c, k, rho, index)
-        gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
+
+            if self.problem.status == 3:
+                print("Constraints infeasible, rho = {}".format(rho))
+                print(self.problem.NumConstrs)
+                return None
+            else:
+                print(self.problem.ObjVal)
         return gurobi_solution
 
 
     def max_similarity(self, c, k, rho, linear_constraint_index):
-        retrieval_size = self.dataset.shape[0]
-        sum_a_c = gp.quicksum(self.a[i] * c[:retrieval_size][i] for i in range(len(self.a)))
-        sum_c = gp.quicksum(c[retrieval_size:])
+        sum_a_c = gp.quicksum([self.a[i] * c[:self.n][i] for i in range(self.n)])
+        sum_c = gp.quicksum(c[self.n:])
         self.problem.addConstr(((1/k)*sum_a_c - (1/self.m)*sum_c) <= rho, name="linear_constraint_{}".format(linear_constraint_index))
         self.problem.addConstr(((1/k)*sum_a_c - (1/self.m)*sum_c) >= -rho, name="neg_linear_constraint_{}".format(linear_constraint_index))
         self.problem.optimize()
-        print(self.problem.ObjVal)
+        self.problem.update()
+
+
+    def sup_function(self, a, k):
+        curation_indicator = np.concatenate((np.zeros(a.shape[0]), np.ones(self.curation_set.shape[0])))
+        a_expanded = np.concatenate((a, np.zeros(self.curation_set.shape[0])))
+        alpha = (a_expanded/k - curation_indicator/self.m)
+        self.model.fit(self.expanded_dataset, alpha)
+    
+    def get_representation(self, indices, k):
+        self.sup_function(indices, k)
+        c = self.model.predict(self.dataset)
+        print("norm", np.linalg.norm(c), flush=True)
+        c /= np.linalg.norm(c)
+        rep = np.abs(np.sum((1/k)*indices*c-(1/self.m)*c))
+        return rep
+
+    def get_similarity(self, indices):
+        sim = indices.T@self.similarity_scores
+        return sim
+    
+class GurobiLP():
+    def __init__(self, similarity_scores, dataset, curation_set=None, model=None):
+        print("using Gurobi...")
+        self.n = dataset.shape[0]
+        self.d = dataset.shape[1]
+        self.dataset = dataset
+
+        if curation_set is None: ## If no curation set is provided, compute MPR over the retrieval set
+            self.curation_set = self.dataset
+        else:
+            self.curation_set = curation_set
+        self.m = self.curation_set.shape[0]
+
+        self.expanded_dataset = np.concatenate((self.dataset, self.curation_set), axis=0)
+
+        self.similarity_scores = similarity_scores.squeeze()
+
+        if model is None:
+            self.model = LinearRegression()
+        else:
+            self.model = model
+
+    def fit(self, k, num_iter, rho):
+        self.problem = gp.Model("mixed_integer_optimization")
+        self.a = self.problem.addVars(self.m, lb=0, ub=1, vtype=GRB.CONTINUOUS, name="a")
+        print("Warm start?", self.problem.Params.LPWarmStart)
+        obj = gp.quicksum(self.similarity_scores[i]*self.a[i] for i in range(self.m))
+        self.problem.setObjective(obj, sense=GRB.MAXIMIZE)
+        self.problem.addConstr(sum([self.a[i] for i in range(self.m)]) == k, "constraint_sum_a")
+        self.problem.optimize()
+       
+        for index in tqdm(range(num_iter)):
+            gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
+            self.sup_function(gurobi_solution, k)
+            c = self.model.predict(self.expanded_dataset)
+            c /= np.linalg.norm(c)
+            
+            if np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:])) < rho:
+            #if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
+                print("constraints satisfied, exiting early")
+                print("\t", np.abs(np.sum((gurobi_solution/k)*c[self.n:])-np.sum((1/self.m)*c[self.n:])))
+                print("\t", rho)
+                break
+            
+            self.max_similarity(c, k, rho, index)
+
+            if self.problem.status == 3:
+                print("Constraints infeasible, rho = {}".format(rho))
+                print(self.problem.NumConstrs)
+                return None
+            else:
+                print(self.problem.ObjVal)
+        return gurobi_solution
+
+
+    def max_similarity(self, c, k, rho, linear_constraint_index):
+        sum_a_c = gp.quicksum([self.a[i] * c[:self.n][i] for i in range(self.n)])
+        sum_c = gp.quicksum(c[self.n:])
+        self.problem.addConstr(((1/k)*sum_a_c - (1/self.m)*sum_c) <= rho, name="linear_constraint_{}".format(linear_constraint_index))
+        self.problem.addConstr(((1/k)*sum_a_c - (1/self.m)*sum_c) >= -rho, name="neg_linear_constraint_{}".format(linear_constraint_index))
+        self.problem.optimize()
+        self.problem.update()
+
 
     def sup_function(self, a, k):
         curation_indicator = np.concatenate((np.zeros(a.shape[0]), np.ones(self.curation_set.shape[0])))
@@ -447,7 +517,7 @@ class PBM():
         return indices, selections
 
 # MMR algorithm (greedy) with MPR as the diversity metric
-class MMR_MPR():
+class MMR_MPR(): ##FIXME add curation capabilities
     def __init__(self, similarity_scores, labels, features):
         self.m = similarity_scores.shape[0]
         self.similarity_scores = similarity_scores

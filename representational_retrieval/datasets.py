@@ -7,9 +7,10 @@ import pandas as pd
 import glob
 
 class CelebA(torch.utils.data.Dataset):
-    def __init__(self, path, attributes = None, train=True, transform=torchvision.transforms.ToTensor()):
+    def __init__(self, path, attributes = None, train=True, transform=torchvision.transforms.ToTensor(), embedding_model=None):
         self.filepath = os.path.join(path, "celeba/")
 
+        self.embedding_model = embedding_model
         self.transform = transform
         self.img_paths = []
         self.labels = []
@@ -94,26 +95,27 @@ class CelebA(torch.utils.data.Dataset):
         return len(self.labels)
 
     def __getitem__(self, idx):
-
-        path = self.filepath + "img_align_celeba/" + self.img_paths[idx]
+        path = os.path.join(self.filepath, "img_align_celeba/", self.img_paths[idx])
         image = Image.open(path)
-
         label = self.labels[idx]
-
+        if self.embedding_model is not None:
+            image_id = self.img_paths[idx].split(".")[0]
+            embeddingpath = os.path.join(self.filepath, self.embedding_model, image_id+".pt")
+            return self.transform(image), label, torch.load(embeddingpath)
         return self.transform(image), label
     
 class Occupations(torch.utils.data.Dataset):
-    def __init__(self, path, transform=torchvision.transforms.ToTensor()):
+    def __init__(self, path, transform=torchvision.transforms.ToTensor(), embedding_model=None):
         self.filepath = os.path.join(path, "occupations/")
 
         self.transform = transform
         self.images = []
         self.labels = []
+        self.embedding_model = embedding_model
 
         ## Labels is [gender, occupation_one_hot]
 
         df = pd.read_csv(self.filepath + "gender_labelled_images.csv")
-        print(df.search_term) ## FIXME
 
         occupation_to_idx = {}
         for i, race in enumerate(df.search_term.unique()):
@@ -131,25 +133,30 @@ class Occupations(torch.utils.data.Dataset):
         self.labels = torch.tensor(torch.hstack([gender.unsqueeze(1), occupation_one_hot]))
 
         construct_path = lambda x, y: os.path.join(self.filepath, "google", str(x), str(y)+".jpg")
-        img_paths = [construct_path(*x) for x in tuple(zip(df['search_term'], df['order']))]
+        self.img_paths = [construct_path(*x) for x in tuple(zip(df['search_term'], df['order']))]
 
-        for path in img_paths:
+        for path in self.img_paths:
             self.images.append(self.transform(Image.open(path)))
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
+        image_id = os.path.relpath(self.img_paths[idx].split(".")[0], self.filepath)
+        if self.embedding_model:
+            embeddingpath = os.path.join(self.filepath, self.embedding_model, image_id+".pt")
+            return self.images[idx], self.labels[idx], torch.load(embeddingpath)
         return self.images[idx], self.labels[idx]
     
 class FairFace(torch.utils.data.Dataset):
-    def __init__(self, path, train=True, transform=torchvision.transforms.ToTensor(), race_one_hot=True):
+    def __init__(self, path, train=True, transform=torchvision.transforms.ToTensor(), embedding_model=None):
         self.filepath = os.path.join(path, "fairface/")
 
         self.transform = transform
         # self.images = []
         self.image_paths = []
         self.labels = []
+        self.embedding_model = embedding_model
 
         if train:
             df = pd.read_csv(self.filepath + "fairface_label_train.csv")
@@ -189,22 +196,27 @@ class FairFace(torch.utils.data.Dataset):
 
         self.labels = torch.tensor(self.labels)
 
-        construct_path = lambda x: os.path.join(self.filepath, x)
-        self.img_paths = [construct_path(x) for x in df.file]
+        # construct_path = lambda x: os.path.join(self.filepath, x)
+        self.img_paths = df.file.to_list()
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        return self.transform(Image.open(self.img_paths[idx])), self.labels[idx]
+        path = os.path.join(self.filepath, self.img_paths[idx])
+        if self.embedding_model is not None:
+            embeddingpath = os.path.join(self.filepath, self.embedding_model, self.img_paths[idx].split(".")[0]+".pt")
+            return self.transform(Image.open(path)), self.labels[idx], torch.load(embeddingpath)
+        return self.transform(Image.open(path)), self.labels[idx]
     
 class UTKFace(torch.utils.data.Dataset):
-    def __init__(self, path, train=True, transform=torchvision.transforms.ToTensor()):
+    def __init__(self, path, train=True, transform=torchvision.transforms.ToTensor(), embedding_model=None):
         self.filepath = os.path.join(path, "utkface/")
 
         self.transform = transform
         self.imagepaths = []
         self.labels = []
+        self.embedding_model = embedding_model
 
         ## labels is [gender, age, race]
 
@@ -227,4 +239,9 @@ class UTKFace(torch.utils.data.Dataset):
         return len(self.labels)
 
     def __getitem__(self, idx):
+        path = self.imagepaths[idx]
+        image_id = os.path.relpath(path.split(".")[0], self.filepath)
+        if self.embedding_model:
+            embeddingpath = os.path.join(self.filepath, self.embedding_model, image_id+".pt")
+            return self.transform(Image.open(self.imagepaths[idx])), self.labels[idx], torch.load(embeddingpath)
         return self.transform(Image.open(self.imagepaths[idx])), self.labels[idx]
