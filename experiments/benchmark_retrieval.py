@@ -123,7 +123,20 @@ def main():
     else:
         curation_features = None
         curation_labels = None
-    
+
+    # dataset_path = "/n/holylabs/LABS/calmon_lab/Lab/datasets/"
+    # if usingclip and args.dataset+'_normalized_clipfeatures_{}.npy'.format(args.n_samples) in os.listdir(dataset_path):
+    #     print("normalized clip features, labels already processed")
+    #     features = np.load(dataset_path+args.dataset+'_normalized_clipfeatures_{}.npy'.format(args.n_samples))
+    #     labels = np.load(dataset_path+args.dataset+'_cliplabels_{}.npy'.format(args.n_samples))
+    # elif not usingclip and args.dataset+'_normalized_dclipFeatures_{}.npy'.format(args.n_samples) in os.listdir(dataset_path):
+    #     print("normalized dclip features, labels already processed")
+    #     features = np.load(dataset_path+args.dataset+'_normalized_dclipFeatures_{}.npy'.format(args.n_samples))
+    #     labels = np.load(dataset_path+args.dataset+'_dclipLabels_{}.npy'.format(args.n_samples))
+    # else:
+    #     all_features = []
+    #     all_labels = []
+
     n = retrieval_labels.shape[0]
 
     with open(args.query, 'r') as f:
@@ -304,7 +317,10 @@ def main():
         elif args.method == "clipclip":
             # get the order of columns to drop to reduce MI with sensitive attributes (support intersectional groups)
             sensitive_attributes_idx = [dataset.attr_to_idx['Male']]
-            gender_MI_order = return_feature_MI_order(retrieval_features, retrieval_labels, sensitive_attributes_idx)
+            if curation_dataset is not None:
+                gender_MI_oder = return_feature_MI_order(curation_features, curation_labels, sensitive_attributes_idx)
+            else:
+                gender_MI_order = return_feature_MI_order(retrieval_features, retrieval_labels, sensitive_attributes_idx)
             # run clipclip method
             solver = ClipClip(retrieval_features, gender_MI_order, args.device)
 
