@@ -24,6 +24,7 @@ def main():
     parser.add_argument('-k', default=10, type=int)
     parser.add_argument('-functionclass', default="linearregression", type=str)
     args = parser.parse_args()
+    print(args)
 
     if args.method != "debiasclip":
         embedding_model = "clip"
@@ -127,25 +128,26 @@ def main():
 
     with open(args.query, 'r') as f:
         queries = f.readlines()
+    model = model.to(args.device)
 
-    for query in tqdm(queries):
+    for query in tqdm(queries[::-1]):
         q_org = query.strip()
         q = "A photo of "+ q_org
         print(q)
         q_token = clip.tokenize(q).to(args.device)
 
         # ensure on the same device
-        model = model.to(args.device)
-        q_token = q_token.to(args.device)
+        # q_token = q_token.to(args.device)
 
         with torch.no_grad():
             q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
         q_emb = q_emb/np.linalg.norm(q_emb)
 
-
-
         # compute similarities
         s = retrieval_features @ q_emb.T
+
+        del q_emb
+        torch.cuda.empty_cache()
 
         results = {}
         if args.method == "lp":
@@ -165,7 +167,6 @@ def main():
                 indices = solver.fit(args.k, num_iter, rho)
                 if indices is None: ## returns none if problem is infeasible
                     break
-                sparsity = sum(indices>1e-4)
                 indices_rounded = indices.copy()
                 indices_rounded[np.argsort(indices_rounded)[::-1][args.k:]] = 0
                 indices_rounded[indices_rounded>1e-5] = 1.0 
@@ -174,14 +175,14 @@ def main():
                 sim = (s.T @ indices)
 
                 reps.append(rep)
-                sims.append(sims)
+                sims.append(sim[0])
                 indices_list.append(indices)
 
                 rounded_rep = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
-                rounded_sim = (s.T @ indices)
+                rounded_sim = (s.T @ indices_rounded)
 
                 rounded_reps.append(rounded_rep)
-                rounded_sims.append(rounded_sim)
+                rounded_sims.append(rounded_sim[0])
                 rounded_indices_list.append(indices_rounded)
 
                 # rhoslist.append(rho)
@@ -220,6 +221,7 @@ def main():
             rhos = np.linspace(0.005, 0.025, 20)
             for rho in tqdm(rhos, desc="rhos"):
                 indices = solver.fit(args.k, num_iter, rho)
+                
                 if indices is None: ## returns none if problem is infeasible
                     break
                 sparsity = sum(indices>1e-4)
@@ -228,7 +230,7 @@ def main():
                 sim = (s.T @ indices)
 
                 reps.append(rep)
-                sims.append(sims)
+                sims.append(sim[0])
                 indices_list.append(indices)
 
             results['MPR'] = reps
@@ -362,10 +364,11 @@ def main():
                 results['indices'] = indices_list
                 results['lambdas'] = lambdas #control amt of intervention. eps = .5 means half the time you take a PBM step, half the time you take a greedy one
                 results['selection'] = selection_list
-
+            
+        del solver
 
         result_path = './results/alex/'
-        q_title = q_org.split(" ")[-1]
+        q_title = q.split(" ")[-1]
         filename_pkl = "{}_{}_{}_{}_{}.pkl".format(args.dataset, args.method, args.k, args.functionclass, q_title)
         if not os.path.exists(result_path):
             os.makedirs(result_path)

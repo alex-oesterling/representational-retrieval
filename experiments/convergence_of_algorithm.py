@@ -16,7 +16,6 @@ def main():
     parser.add_argument('-device', default="cuda", type=str)
     parser.add_argument('-dataset', default="celeba", type=str)
     parser.add_argument('-n_samples', default=10000, type=int)
-    parser.add_argument('-cutting_planes', default=10, type=int)
     parser.add_argument('-query', default="A photo of a CEO", type=str)
     parser.add_argument('-k', default=10, type=int)
     parser.add_argument('-functionclass', default="linearregression", type=str)
@@ -123,12 +122,12 @@ def main():
     rounded_indices_list = []
     gurobi_indices_list = []
     rhoslist = []
-    rhos = np.linspace(0.005, 0.025, 20)
-    for rho in tqdm(rhos[::-1], desc="rhos"):
-        indices = solver2.fit(args.k, args.cutting_planes, rho)
+    rho = 0.01
+    iters = [1,2,5,10,20,50,100]
+    for num_iters in iters:
+        indices = solver2.fit(args.k, num_iters, rho)
         if indices is None:
             break
-        sparsity = sum(indices>1e-4)
         indices_rounded = indices.copy()
         indices_rounded[np.argsort(indices_rounded)[::-1][args.k:]] = 0
         indices_rounded[indices_rounded>1e-5] = 1.0 
@@ -143,13 +142,13 @@ def main():
         sims_relaxed.append(sim)
         rounded_reps_final.append(rounded_rep)
         rounded_sims_final.append(rounded_sim)
-        sparsities.append(sparsity)
         rounded_indices_list.append(indices_rounded)
         relaxed_indices_list.append(indices)
 
-        indices_gurobi = solver.fit(args.k, args.cutting_planes, rho)
+        indices_gurobi = solver.fit(args.k, num_iters, rho)
         if indices_gurobi is None:
             break
+        
         rep = solver.get_representation(indices_gurobi, args.k)
         sim = solver.get_similarity(indices_gurobi)
 
@@ -157,7 +156,6 @@ def main():
 
         reps_gurobi.append(rep)
         sims_gurobi.append(sim)
-        rhoslist.append(rho)
 
     print("final mprs", reps_relaxed)
     print("final sims", sims_relaxed)
@@ -167,51 +165,45 @@ def main():
     print("Sim upper bound:", sim_upper_bound)
     print("Rep lower bound:", rep_upper_bound)
 
-    results = {}
-    results['MPR'] = reps_gurobi
-    results['sims'] = sims_gurobi
-    # results['rounded_MPR'] = rounded_reps_final
-    # results['rounded_sims'] = rounded_sims_final
-    results['indices'] = gurobi_indices_list
-    # results['rounded_indices'] = rounded_indices_list
-    results['rhos'] = rhos
-    result_path = './results/alex/'
-    filename_pkl = "{}_gurobi_ip_{}_{}.pkl".format(args.dataset, args.k, args.functionclass)
-    if not os.path.exists(result_path):
-        os.makedirs(result_path)
-    with open(result_path + filename_pkl, 'wb') as f:
-        pickle.dump(results, f)
-
-    results = {}
-    results['MPR'] = reps_relaxed
-    results['sims'] = sims_relaxed
-    results['rounded_MPR'] = rounded_reps_final
-    results['rounded_sims'] = rounded_sims_final
-    results['indices'] = relaxed_indices_list
-    results['rounded_indices'] = rounded_indices_list
-    results['rhos'] = rhos
-    result_path = './results/alex/'
-    filename_pkl = "{}_gurobi_lp_{}_{}.pkl".format(args.dataset, args.k, args.functionclass)
-    if not os.path.exists(result_path):
-        os.makedirs(result_path)
-    with open(result_path + filename_pkl, 'wb') as f:
-        pickle.dump(results, f)
-
-    plt.figure()
-    plt.title("Oracle, {}, {}".format(args.functionclass, args.dataset))
-    plt.plot(rounded_reps_final, rounded_sims_final, label="LP-Rounded")
-    plt.plot(reps_relaxed,sims_relaxed, label="LP")
-    plt.plot(reps_gurobi,sims_gurobi, label="IP")
-    plt.plot(rhoslist,sims_gurobi, label="rho-ip", linestyle="--")
-    plt.plot(rhoslist,sims_relaxed, label="rho-lp", linestyle="--")
-    plt.plot(rhoslist,rounded_sims_final, label="rho-lp-rounded", linestyle="--")
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    plt.title("{}, {}".format(args.functionclass, args.dataset))
+    ax.plot(iters, rounded_reps_final, label="LP-Rounded")
+    ax.plot(iters, reps_relaxed, label="LP")
+    ax.plot(iters, reps_gurobi, label="IP")
+    ax.legend()
+    ax2 = ax.twinx()
+    ax2.plot(iters, rounded_sims_final, label="LP-Rounded", linestyle=":")
+    ax2.plot(iters, sims_relaxed, label="LP", linestyle=":")
+    ax2.plot(iters, sims_gurobi, label="IP", linestyle=":")
     # plt.plot(rhos[::-1], sims_final, label="Rho Constraints")
-    plt.axhline(y=sim_upper_bound, color='b', linestyle=':', label="Similarity Upper Bound")
-    plt.axvline(x=rep_upper_bound, color='r', linestyle=':', label="Representation Lower Bound")
-    plt.xlabel('Representation')
-    plt.ylabel('Similarity')
-    plt.legend()
-    plt.savefig("./results/ip_lp_{}_{}_nsamples_{}_k_{}_iter_{}.png".format(args.functionclass, args.dataset, args.n_samples, args.k, args.cutting_planes))
+    ax.axhline(y=rho, color='black', linestyle='--', label="Target Rho")
+    # plt.axvline(x=rep_upper_bound, color='r', linestyle=':', label="Representation Lower Bound")
+    ax.set_xlabel('Iterations')
+    ax.set_ylabel('Representation')
+    ax2.set_ylabel('Similarity')
+    # ax2.legend(loc=0)
+    plt.savefig("./results/iterstest_{}_{}_nsamples_{}_k_{}.png".format(args.functionclass, args.dataset, args.n_samples, args.k))
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    plt.title("{}, {}".format(args.functionclass, args.dataset))
+    ax.plot(iters, rounded_reps_final, label="LP-Rounded")
+    ax.plot(iters, reps_relaxed, label="LP")
+    ax.plot(iters, reps_gurobi, label="IP")
+    ax.legend(loc=0)
+    # ax2 = ax.twinx()
+    # ax2.plot(iters, rounded_sims_final, label="LP-Rounded", linestyle=":")
+    # ax2.plot(iters, sims_relaxed, label="LP", linestyle=":")
+    # ax2.plot(iters, sims_gurobi, label="IP", linestyle=":")
+    # plt.plot(rhos[::-1], sims_final, label="Rho Constraints")
+    ax.axhline(y=rho, color='black', linestyle='--', label="Target Rho")
+    # plt.axvline(x=rep_upper_bound, color='r', linestyle=':', label="Representation Lower Bound")
+    ax.set_xlabel('Iterations')
+    ax.set_ylabel('Representation')
+    # ax2.set_ylabel('Similarity')
+    # ax2.legend(loc=0)
+    plt.savefig("./results/iterstest_nosims_{}_{}_nsamples_{}_k_{}.png".format(args.functionclass, args.dataset, args.n_samples, args.k))
 
     # plt.figure()
     # plt.title("Oracle, {}, {}".format(args.functionclass, args.dataset))

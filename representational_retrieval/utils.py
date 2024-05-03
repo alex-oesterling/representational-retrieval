@@ -6,9 +6,9 @@ def oracle_function(indices, dataset, curation_set=None, model=None): ## FIXME
     if model is None:
         model = LinearRegression()
 
-    m = dataset.shape[0]
     k = int(np.sum(indices))
     if curation_set is not None:
+        m = curation_set.shape[0]
         expanded_dataset = np.concatenate((dataset, curation_set), axis=0)
         curation_indicator = np.concatenate((np.zeros(dataset.shape[0]), np.ones(curation_set.shape[0])))
         a_expanded = np.concatenate((indices, np.zeros(curation_set.shape[0])))
@@ -16,15 +16,14 @@ def oracle_function(indices, dataset, curation_set=None, model=None): ## FIXME
         alpha = (a_expanded/k - curation_indicator/m)
         reg = model.fit(expanded_dataset, alpha)
     else:
+        m = dataset.shape[0]
         alpha = (indices/k - 1/m)
         reg = model.fit(dataset, alpha)
     return reg
 
-def compute_mpr(indices, dataset, curation_set=None, model=None):
+def getMPR(indices, dataset, k, curation_set=None, model=None):
     reg = oracle_function(indices, dataset, curation_set=curation_set, model=model)
 
-    m = dataset.shape[0]
-    k = int(np.sum(indices))
     if curation_set is not None:
         expanded_dataset = np.concatenate((dataset, curation_set), axis=0)
         m = curation_set.shape[0]
@@ -32,6 +31,7 @@ def compute_mpr(indices, dataset, curation_set=None, model=None):
         c /= np.linalg.norm(c)
         mpr = np.abs(np.sum((indices/k)*c[:dataset.shape[0]] - (1/m)*c[dataset.shape[0]:]))
     else:
+        m = dataset.shape[0]
         c = reg.predict(dataset)
         c /= np.linalg.norm(c)
         mpr = np.abs(np.sum((indices/k)*c - (1/m)*c))
@@ -60,14 +60,14 @@ def statEmbedding(embeddings):
     std_embedding = np.std(distances)
     return mean_embedding, std_embedding
 
-def getMPR(indices, labels, oracle, k, m):
-    # c(x)
-    weighting_clf = oracle_function(indices, labels, model=oracle)
-    # c(x) evaluated on data points and normalized
-    weighting_vector  = weighting_clf.predict(labels)
-    weighting_vector/= np.linalg.norm(weighting_vector)
-    rep = np.sum((1/k)*indices* weighting_vector -(1/m)*weighting_vector) # weighting_vector is c
-    return rep
+# def getMPR(indices, labels, oracle, k, m):
+#     # c(x)
+#     weighting_clf = oracle_function(indices, labels, model=oracle)
+#     # c(x) evaluated on data points and normalized
+#     weighting_vector  = weighting_clf.predict(labels)
+#     weighting_vector/= np.linalg.norm(weighting_vector)
+#     rep = np.sum((1/k)*indices* weighting_vector -(1/m)*weighting_vector) # weighting_vector is c
+#     return rep
 
 # for clipclip benchmark method
 def calc_feature_MI(features, labels, n_neighbors = 10, rs=1):
