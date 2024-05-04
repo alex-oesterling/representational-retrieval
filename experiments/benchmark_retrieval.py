@@ -6,11 +6,29 @@ import argparse
 import seaborn as sns
 import clip
 from sklearn.ensemble import RandomForestRegressor
-from torch.utils.data import DataLoader
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.linear_model import LinearRegression
 sns.set_style("whitegrid")
 import pickle
 import os
 import debias_clip as dclip
+import json
+
+def get_top_embeddings_labels_ids(dataset, query, embedding_model, datadir):
+    retrievaldir = os.path.join("/n/holylabs/LABS/calmon_lab/Lab/datasets",datadir, embedding_model,query)
+
+    embeddings = np.load(os.path.join(retrievaldir, "embeds.npy"))
+    labels = torch.zeros((embeddings.shape[0], dataset.labels.shape[1]))
+    indices = []
+    with open(os.path.join(retrievaldir, "images.txt"), "r") as f:
+        lines = f.readlines()
+        for i, line in enumerate(lines):
+            line = line.strip()
+            idx = dataset.img_paths.index(line+".jpg")
+            labels[i] = dataset.labels[idx]
+            indices.append(idx)
+    
+    return embeddings, labels, indices
 
 def main():
     parser = argparse.ArgumentParser()
@@ -18,11 +36,9 @@ def main():
     parser.add_argument('-device', default="cuda", type=str)
     parser.add_argument('-dataset', default="celeba", type=str)
     parser.add_argument('-curation_dataset', default=None, type=str)
-    parser.add_argument('-n_samples', default=10000, type=int)
-    parser.add_argument('-n_curation_samples', default=0, type=int)
     parser.add_argument('-query', default="queries.txt", type=str)
     parser.add_argument('-k', default=10, type=int)
-    parser.add_argument('-functionclass', default="linearregression", type=str)
+    parser.add_argument('-functionclass', default="randomforest", type=str)
     args = parser.parse_args()
     print(args)
 
@@ -65,64 +81,82 @@ def main():
         reg_model = RandomForestRegressor(max_depth=2)
     elif args.functionclass == "linearregression":
         reg_model = LinearRegression()
+    elif args.functionclass == "decisiontree":
+        reg_model = DecisionTreeRegressor(max_depth=5)
     else:
         print("Function class not supported.")
         exit()
 
-    batch_size = 512
-    if args.n_samples == -1:
-        args.n_samples = len(dataset)
-    elif args.n_samples > len(dataset):
-        print("n_samples greater than dataset size. Please put -1 for full dataset. Breaking.")
-        exit()
+    # batch_size = 512
+    # if args.n_samples == -1:
+    #     args.n_samples = len(dataset)
+    # elif args.n_samples > len(dataset):
+    #     print("n_samples greater than dataset size. Please put -1 for full dataset. Breaking.")
+    #     exit()
 
     ## This is slow becase appending tensors to list. If we want to speed this up, precompute retrieval_features size
     # save features and labels
-    label_size = dataset[0][1].shape[-1]
-    num_batches = (args.n_samples // batch_size) + int(args.n_samples % batch_size != 0)
-    retrieval_features = torch.zeros((num_batches*batch_size, 512))
-    retrieval_labels = torch.zeros((num_batches*batch_size, label_size))
-    ix = 0
-    for _, labels, embedding in tqdm(DataLoader(dataset, batch_size=batch_size)):
-        retrieval_features[ix*batch_size:(ix+1)*batch_size, :] = embedding
-        retrieval_labels[ix*batch_size:(ix+1)*batch_size, :] = labels
-        ix += 1
-        if ix>=num_batches:
-            break
+    # label_size = dataset[0][1].shape[-1]
+    # num_batches = (args.n_samples // batch_size) + int(args.n_samples % batch_size != 0)
+    # retrieval_features = torch.zeros((num_batches*batch_size, 512))
+    # retrieval_labels = torch.zeros((num_batches*batch_size, label_size))
+    # ix = 0
+    # for _, labels, embedding in tqdm(DataLoader(dataset, batch_size=batch_size)):
+    #     retrieval_features[ix*batch_size:(ix+1)*batch_size, :] = embedding
+    #     retrieval_labels[ix*batch_size:(ix+1)*batch_size, :] = labels
+    #     ix += 1
+    #     if ix>=num_batches:
+    #         break
 
-    retrieval_features, retrieval_labels =retrieval_features.cpu().numpy(), retrieval_labels.cpu().numpy()
+    # retrieval_features, retrieval_labels = retrieval_features.cpu().numpy(), retrieval_labels.cpu().numpy()
 
-    retrieval_features = retrieval_features.astype(np.float64)
-    retrieval_features = retrieval_features/ np.linalg.norm(retrieval_features, axis=1, keepdims=True)  # Calculate L2 norm for each row
+    # retrieval_features = retrieval_features.astype(np.float64)
+    # retrieval_features = retrieval_features/ np.linalg.norm(retrieval_features, axis=1, keepdims=True)  # Calculate L2 norm for each row
 
     ## Do the exact same for the curation set if it exists
-    if curation_dataset is not None:
-        if args.n_curation_samples == -1:
-            args.n_curation_samples = len(curation_dataset)
-        elif args.n_curation_samples > len(curation_dataset):
-            print("n_samples greater than dataset size. Please put -1 for full dataset. Breaking.")
-            exit()
+    # if curation_dataset is not None:
+        # if args.n_curation_samples == -1:
+        #     args.n_curation_samples = len(curation_dataset)
+        # elif args.n_curation_samples > len(curation_dataset):
+        #     print("n_samples greater than dataset size. Please put -1 for full dataset. Breaking.")
+        #     exit()
 
-        ## This is slow becase appending tensors to list. If we want to speed this up, precompute retrieval_features size
-        # save features and labels
-        label_size = dataset[0][1].shape[-1]
-        num_batches = (args.n_curation_samples // batch_size) + int(args.n_curation_samples % batch_size != 0)
-        curation_features = torch.zeros(num_batches*batch_size, 512)
-        curation_labels = torch.zeros(num_batches*batch_size, label_size)
-        ix = 0
-        for _, labels, embedding in tqdm(DataLoader(curation_dataset, batch_size=batch_size)):
-            curation_features[ix*batch_size:(ix+1)*batch_size, :] = embedding
-            curation_labels[ix*batch_size:(ix+1)*batch_size, :] = labels
-            ix += 1
-            if ix >= num_batches:
-                break
+        # ## This is slow becase appending tensors to list. If we want to speed this up, precompute retrieval_features size
+        # # save features and labels
+        # label_size = curation_dataset[0][1].shape[-1]
+        # num_batches = (args.n_curation_samples // batch_size) + int(args.n_curation_samples % batch_size != 0)
+        # curation_features = torch.zeros(num_batches*batch_size, 512)
+        # curation_labels = torch.zeros(num_batches*batch_size, label_size)
+        # ix = 0
+        # for _, labels, embedding in tqdm(DataLoader(curation_dataset, batch_size=batch_size)):
+        #     curation_features[ix*batch_size:(ix+1)*batch_size, :] = embedding
+        #     curation_labels[ix*batch_size:(ix+1)*batch_size, :] = labels
+        #     ix += 1
+        #     if ix >= num_batches:
+        #         break
 
-        curation_features, curation_labels = curation_features.cpu().numpy(), curation_labels.cpu().numpy()
-        curation_features = curation_features.astype(np.float64)
-        curation_features = curation_features/ np.linalg.norm(curation_features, axis=1, keepdims=True)  # Calculate L2 norm for each row
-    else:
-        curation_features = None
-        curation_labels = None
+        # curation_features, curation_labels = curation_features.cpu().numpy(), curation_labels.cpu().numpy()
+        # curation_features = curation_features.astype(np.float64)
+        # curation_features = curation_features/ np.linalg.norm(curation_features, axis=1, keepdims=True)  # Calculate L2 norm for each row
+        # ## Prune labels to ones shared by both datasets:
+        # with open('representational_retrieval/shared_labels.json') as f:
+        #     d = json.load(f)[args.dataset][args.curation_dataset]
+        #     print("Shared labels for {}, {}:".format(args.dataset, args.curation_dataset))
+        #     ret_indices = []
+        #     cur_indices = []
+        #     for lab in d.keys():
+        #         print(lab)
+        #         ret_indices.extend(d[lab][0])
+        #         cur_indices.extend(d[lab][1])
+        #     print(ret_indices)
+        #     print(cur_indices)
+        # curation_labels = curation_labels[:, cur_indices]
+        # retrieval_labels = retrieval_labels[:, ret_indices]
+                
+                
+    # else:
+    #     curation_features = None
+    #     curation_labels = None
 
     # dataset_path = "/n/holylabs/LABS/calmon_lab/Lab/datasets/"
     # if usingclip and args.dataset+'_normalized_clipfeatures_{}.npy'.format(args.n_samples) in os.listdir(dataset_path):
@@ -137,7 +171,7 @@ def main():
     #     all_features = []
     #     all_labels = []
 
-    n = retrieval_labels.shape[0]
+    n = 10000
 
     with open(args.query, 'r') as f:
         queries = f.readlines()
@@ -146,11 +180,40 @@ def main():
     for query in tqdm(queries[::-1]):
         q_org = query.strip()
         q = "A photo of "+ q_org
+        q_tag = q.split(" ")[-1]
         print(q)
         q_token = clip.tokenize(q).to(args.device)
 
-        # ensure on the same device
-        # q_token = q_token.to(args.device)
+        retrieval_features, retrieval_labels, retrieval_indices = get_top_embeddings_labels_ids(
+            dataset,
+            q_tag,
+            embedding_model,
+            args.dataset
+        )
+
+        curation_features, curation_labels, curation_indices = get_top_embeddings_labels_ids(
+            curation_dataset,
+            q_tag,
+            embedding_model,
+            args.curation_dataset
+        )
+
+        with open('representational_retrieval/shared_labels.json') as f:
+            d = json.load(f)[args.dataset][args.curation_dataset]
+            print("Shared labels for {}, {}:".format(args.dataset, args.curation_dataset))
+            ret_indices = []
+            cur_indices = []
+            for lab in d.keys():
+                print(lab)
+                ret_indices.append(d[lab][0]) if isinstance(d[lab][0], int) else ret_indices.extend(d[lab][0])
+                cur_indices.append(d[lab][1]) if isinstance(d[lab][1], int) else cur_indices.extend(d[lab][1])
+            print(ret_indices)
+            print(cur_indices)
+        curation_labels = curation_labels[:, cur_indices]
+        retrieval_labels = retrieval_labels[:, ret_indices]
+
+        print(curation_labels.shape)
+        print(retrieval_labels.shape)
 
         with torch.no_grad():
             q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
@@ -166,7 +229,7 @@ def main():
         if args.method == "lp":
             solver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
 
-            num_iter = 10
+            num_iter = 50
 
             reps = []
             sims = []
@@ -174,7 +237,6 @@ def main():
             rounded_sims = []
             indices_list = []
             rounded_indices_list = []
-            # rhoslist = []
             rhos = np.linspace(0.005, 0.025, 20)
             for rho in tqdm(rhos, desc="rhos"):
                 indices = solver.fit(args.k, num_iter, rho)
@@ -198,18 +260,6 @@ def main():
                 rounded_sims.append(rounded_sim[0])
                 rounded_indices_list.append(indices_rounded)
 
-                # rhoslist.append(rho)
-
-            # for p in tqdm(lambdas):
-            #     indices, diversity_cost, selection = solver.fit(args.k, num_iter) 
-            #     # rep = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
-            #     sim = (s.T @ indices)
-            #     reps.append(rep)
-            #     sims.append(sim)
-            #     indices_list.append(indices)
-            #     selection_list.append(selection)
-            #     MMR_cost_list.append(diversity_cost)
-
             results['MPR'] = reps
             results['sims'] = sims
             results['indices'] = indices_list
@@ -217,12 +267,12 @@ def main():
             results['rounded_sims'] = rounded_sims
             results['rounded_indices'] = rounded_indices_list
             results['rhos'] = rhos
-            # results['selection'] = selection_list
-            # results['MMR_cost'] = MMR_cost_list
+            solver.problem.dispose()
+            del solver
         elif args.method == "ip":
             solver = GurobiIP(s, retrieval_labels, curation_set=curation_labels, model = reg_model)
 
-            num_iter = 10
+            num_iter = 50
 
             reps = []
             sims = []
@@ -230,7 +280,6 @@ def main():
             rounded_sims = []
             indices_list = []
             rounded_indices_list = []
-            # rhoslist = []
             rhos = np.linspace(0.005, 0.025, 20)
             for rho in tqdm(rhos, desc="rhos"):
                 indices = solver.fit(args.k, num_iter, rho)
@@ -250,6 +299,9 @@ def main():
             results['sims'] = sims
             results['indices'] = indices_list
             results['rhos'] = rhos
+            solver.problem.dispose()
+            del solver
+
         elif args.method == "mmr":
             solver = MMR(s, retrieval_features, curation_embeddings=curation_features)
             lambdas = np.linspace(0, 1-1e-5, 50)
@@ -380,12 +432,9 @@ def main():
                 results['indices'] = indices_list
                 results['lambdas'] = lambdas #control amt of intervention. eps = .5 means half the time you take a PBM step, half the time you take a greedy one
                 results['selection'] = selection_list
-            
-        del solver
-
         result_path = './results/alex/'
         q_title = q.split(" ")[-1]
-        filename_pkl = "{}_{}_{}_{}_{}.pkl".format(args.dataset, args.method, args.k, args.functionclass, q_title)
+        filename_pkl = "{}_curation_{}_top10k_{}_{}_{}_{}.pkl".format(args.dataset, args.curation_dataset, args.method, args.k, args.functionclass, q_title)
         if not os.path.exists(result_path):
             os.makedirs(result_path)
         with open(result_path + filename_pkl, 'wb') as f:

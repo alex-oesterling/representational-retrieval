@@ -166,3 +166,5 @@ results/*.png
 results/*
 /results
 *.pkl
+
+environment.yml

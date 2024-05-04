@@ -100,11 +100,11 @@ class MMR():
         # define what embedding to use for the diversity metric.
         # None (img itself), CLIP, or CLIP+PCA
         self.embeddings = retreival_embeddings # the entire dataset (also used for retrieval), or a separate curation set
-        if curation_embeddings: ## If curation set provided, estimate means over it.
-            self.mean_embedding, self.std_embedding =  statEmbedding(curation_embeddings)
-        else:
+        if curation_embeddings is None: ## If curation set provided, estimate means over it.
             self.mean_embedding = None
             self.std_embedding = None
+        else:
+            self.mean_embedding, self.std_embedding =  statEmbedding(curation_embeddings)
 
     def fit(self, k, lambda_):
         if self.mean_embedding is None or self.std_embedding is None:
