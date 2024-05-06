@@ -8,6 +8,7 @@ import clip
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.linear_model import LinearRegression
+from sklearn.neural_network import MLPRegressor
 sns.set_style("whitegrid")
 import pickle
 import os
@@ -83,6 +84,8 @@ def main():
         reg_model = LinearRegression()
     elif args.functionclass == "decisiontree":
         reg_model = DecisionTreeRegressor(max_depth=5)
+    elif args.functionclass == "mlp":
+        reg_model = MLPRegressor([64, 64])
     else:
         print("Function class not supported.")
         exit()
@@ -177,7 +180,7 @@ def main():
         queries = f.readlines()
     model = model.to(args.device)
 
-    for query in tqdm(queries[::-1]):
+    for query in tqdm(queries):
         q_org = query.strip()
         q = "A photo of "+ q_org
         q_tag = q.split(" ")[-1]
@@ -203,10 +206,16 @@ def main():
             print("Shared labels for {}, {}:".format(args.dataset, args.curation_dataset))
             ret_indices = []
             cur_indices = []
+            attribute_indices = []
             for lab in d.keys():
                 print(lab)
                 ret_indices.append(d[lab][0]) if isinstance(d[lab][0], int) else ret_indices.extend(d[lab][0])
                 cur_indices.append(d[lab][1]) if isinstance(d[lab][1], int) else cur_indices.extend(d[lab][1])
+                if isinstance(d[lab][0], list):
+                    for _ in range(len(d[lab][0])):
+                        attribute_indices.append(lab) 
+                else:
+                    attribute_indices.append(lab)
             print(ret_indices)
             print(cur_indices)
         curation_labels = curation_labels[:, cur_indices]
@@ -222,7 +231,6 @@ def main():
         # compute similarities
         s = retrieval_features @ q_emb.T
 
-        del q_emb
         torch.cuda.empty_cache()
 
         results = {}
@@ -241,12 +249,13 @@ def main():
             for rho in tqdm(rhos, desc="rhos"):
                 indices = solver.fit(args.k, num_iter, rho)
                 if indices is None: ## returns none if problem is infeasible
-                    break
+                    continue
                 indices_rounded = indices.copy()
                 indices_rounded[np.argsort(indices_rounded)[::-1][args.k:]] = 0
                 indices_rounded[indices_rounded>1e-5] = 1.0 
 
                 rep = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                print("Rep: ", rep)
                 sim = (s.T @ indices)
 
                 reps.append(rep)
@@ -254,6 +263,7 @@ def main():
                 indices_list.append(indices)
 
                 rounded_rep = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                print("Rounded Rep", rounded_rep)
                 rounded_sim = (s.T @ indices_rounded)
 
                 rounded_reps.append(rounded_rep)
@@ -285,7 +295,7 @@ def main():
                 indices = solver.fit(args.k, num_iter, rho)
                 
                 if indices is None: ## returns none if problem is infeasible
-                    break
+                    continue
                 sparsity = sum(indices>1e-4)
                 
                 rep = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
@@ -368,10 +378,17 @@ def main():
         
         elif args.method == "clipclip":
             # get the order of columns to drop to reduce MI with sensitive attributes (support intersectional groups)
-            sensitive_attributes_idx = [dataset.attr_to_idx['Male']]
+            selected_attribute_indices = []
+            group = ["gender"]
+            for grp in group:
+                for i, att in enumerate(attribute_indices):
+                    if grp == att:
+                        selected_attribute_indices.append(i)
             if curation_dataset is not None:
-                gender_MI_oder = return_feature_MI_order(curation_features, curation_labels, sensitive_attributes_idx)
+                sensitive_attributes_idx = selected_attribute_indices
+                gender_MI_order = return_feature_MI_order(curation_features, curation_labels, sensitive_attributes_idx)
             else:
+                sensitive_attributes_idx = selected_attribute_indices
                 gender_MI_order = return_feature_MI_order(retrieval_features, retrieval_labels, sensitive_attributes_idx)
             # run clipclip method
             solver = ClipClip(retrieval_features, gender_MI_order, args.device)
