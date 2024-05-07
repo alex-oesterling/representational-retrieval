@@ -23,20 +23,20 @@ def get_top_embeddings_labels_ids(dataset, query, embedding_model, datadir):
             image_id = os.path.relpath(path.split(".")[0], filepath)
             embeddingpath = os.path.join(filepath, embedding_model, image_id+".pt")
             embeddings.append(torch.load(embeddingpath))
-        embeddings = torch.stack(embeddings).cpu()
-        labels = dataset.labels
+        embeddings = torch.stack(embeddings).cpu().numpy()
+        labels = dataset.labels.numpy()
         indices = torch.arange(embeddings.shape[0])
     else:
         retrievaldir = os.path.join("/n/holylabs/LABS/calmon_lab/Lab/datasets", datadir, embedding_model,query)
         embeddings = np.load(os.path.join(retrievaldir, "embeds.npy"))
-        labels = torch.zeros((embeddings.shape[0], dataset.labels.shape[1]))
+        labels = np.zeros((embeddings.shape[0], dataset.labels.shape[1]))
         indices = []
         with open(os.path.join(retrievaldir, "images.txt"), "r") as f:
             lines = f.readlines()
             for i, line in enumerate(lines):
                 line = line.strip()
                 idx = dataset.img_paths.index(line+".jpg")
-                labels[i] = dataset.labels[idx]
+                labels[i] = dataset.labels[idx].numpy()
                 indices.append(idx)
     
     return embeddings, labels, indices
@@ -246,8 +246,6 @@ def main():
 
         # compute similarities
         s = retrieval_features @ q_emb.T
-
-        s = s.numpy()
 
         torch.cuda.empty_cache()
 
