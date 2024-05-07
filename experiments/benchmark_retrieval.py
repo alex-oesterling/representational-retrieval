@@ -1,3 +1,5 @@
+import sys
+sys.path.append("../")
 from representational_retrieval import *
 import torch
 import numpy as np
