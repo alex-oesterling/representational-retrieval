@@ -213,36 +213,36 @@ def main():
                 embedding_model,
                 args.curation_dataset
             )
+            with open('representational_retrieval/shared_labels.json') as f:
+                d = json.load(f)[args.dataset][args.curation_dataset]
+                print("Shared labels for {}, {}:".format(args.dataset, args.curation_dataset))
+                ret_indices = []
+                cur_indices = []
+                # attribute_indices = []
+                for lab in d.keys():
+                    print(lab)
+                    ret_indices.append(d[lab][0]) if isinstance(d[lab][0], int) else ret_indices.extend(d[lab][0])
+                    cur_indices.append(d[lab][1]) if isinstance(d[lab][1], int) else cur_indices.extend(d[lab][1])
+                    # if isinstance(d[lab][0], list):
+                    #     for _ in range(len(d[lab][0])):
+                    #         attribute_indices.append(lab) 
+                    # else:
+                    #     attribute_indices.append(lab)
+            print(ret_indices)
+            print(cur_indices)
+            curation_labels_full = curation_labels
+            curation_labels = curation_labels[:, cur_indices]
+            retrieval_labels = retrieval_labels[:, ret_indices]
         else:
             curation_features = None
             curation_labels = None
+            curation_labels_full = None
 
         n = retrieval_labels.shape[0]
 
-        with open('representational_retrieval/shared_labels.json') as f:
-            d = json.load(f)[args.dataset][args.curation_dataset]
-            print("Shared labels for {}, {}:".format(args.dataset, args.curation_dataset))
-            ret_indices = []
-            cur_indices = []
-            attribute_indices = []
-            for lab in d.keys():
-                print(lab)
-                ret_indices.append(d[lab][0]) if isinstance(d[lab][0], int) else ret_indices.extend(d[lab][0])
-                cur_indices.append(d[lab][1]) if isinstance(d[lab][1], int) else cur_indices.extend(d[lab][1])
-                if isinstance(d[lab][0], list):
-                    for _ in range(len(d[lab][0])):
-                        attribute_indices.append(lab) 
-                else:
-                    attribute_indices.append(lab)
-            print(ret_indices)
-            print(cur_indices)
-        curation_labels_full = curation_labels
         if args.use_clip:
             curation_labels = curation_features
-            retrieval_labels = retrieval_features
-        else:
-            curation_labels = curation_labels[:, cur_indices]
-            retrieval_labels = retrieval_labels[:, ret_indices]
+            retrieval_labels = retrieval_features 
 
         print(retrieval_features.shape)
 
@@ -411,18 +411,13 @@ def main():
         
         elif args.method == "clipclip":
             # get the order of columns to drop to reduce MI with sensitive attributes (support intersectional groups)
-            selected_attribute_indices = []
-            group = ["gender"]
-            for grp in group:
-                for i, att in enumerate(attribute_indices):
-                    if grp == att:
-                        selected_attribute_indices.append(i)
             if curation_dataset is not None:
-                sensitive_attributes_idx = selected_attribute_indices
-                gender_MI_order = return_feature_MI_order(curation_features, curation_labels_full, [0,1,2])
+                # sensitive_attributes_idx = selected_attribute_indices
+                print(curation_labels_full.shape)
+                gender_MI_order = return_feature_MI_order(curation_features, curation_labels_full, [0,1,2,3,4,5,6,7,8])
             else:
-                sensitive_attributes_idx = selected_attribute_indices
-                gender_MI_order = return_feature_MI_order(retrieval_features, retrieval_labels, sensitive_attributes_idx)
+                # sensitive_attributes_idx = selected_attribute_indices
+                gender_MI_order = return_feature_MI_order(retrieval_features, retrieval_labels, [20]) ## This is for CelebA
             # run clipclip method
             solver = ClipClip(retrieval_features, gender_MI_order, args.device)
 
