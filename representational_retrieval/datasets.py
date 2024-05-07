@@ -155,7 +155,6 @@ class Occupations(torch.utils.data.Dataset):
 
         for path in self.img_paths:
             self.images.append(self.transform(Image.open(path)))
-
         print(self.labeltags)
 
     def __len__(self):

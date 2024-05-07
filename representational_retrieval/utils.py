@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 import sklearn.feature_selection as fs
 
-def oracle_function(indices, dataset, curation_set=None, model=None): ## FIXME
+def oracle_function(indices, dataset, curation_set=None, model=None):
     if model is None:
         model = LinearRegression()
 
@@ -22,6 +22,21 @@ def oracle_function(indices, dataset, curation_set=None, model=None): ## FIXME
     return reg
 
 def getMPR(indices, dataset, k, curation_set=None, model=None):
+    if model is not None and model == "linearregressiontheoretical":
+        if curation_set is not None:
+            m = curation_set.shape[0]
+            term1 = 1/(k**2) * np.sum(np.outer(dataset, dataset.T))
+            term2 = 1/(k*m) * np.sum(np.outer(dataset, curation_set.T))
+            term3 = 1/(m**2) * np.sum(np.outer(curation_set, curation_set.T))
+            mpr = term1+term2+term3
+        else:
+            m = dataset.shape[0]
+            term1 = 1/(k**2) * np.sum(np.outer(dataset, dataset.T))
+            term2 = 1/(k*m) * np.sum(np.outer(dataset, dataset.T))
+            term3 = 1/(m**2) * np.sum(np.outer(dataset, dataset.T))
+            mpr = term1+term2+term3
+        return mpr
+
     reg = oracle_function(indices, dataset, curation_set=curation_set, model=model)
 
     if curation_set is not None:
@@ -29,12 +44,12 @@ def getMPR(indices, dataset, k, curation_set=None, model=None):
         m = curation_set.shape[0]
         c = reg.predict(expanded_dataset)
         c /= np.linalg.norm(c)
-        mpr = np.abs(np.sum((indices/k)*c[:dataset.shape[0]] - (1/m)*c[dataset.shape[0]:]))
+        mpr = np.abs(np.sum((indices/k)*c[:dataset.shape[0]]) - np.sum((1/m)*c[dataset.shape[0]:]))
     else:
         m = dataset.shape[0]
         c = reg.predict(dataset)
         c /= np.linalg.norm(c)
-        mpr = np.abs(np.sum((indices/k)*c - (1/m)*c))
+        mpr = np.abs(np.sum((indices/k)*c) - np.sum((1/m)*c))
     
     return mpr
 

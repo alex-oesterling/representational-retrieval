@@ -248,7 +248,7 @@ class GurobiIP():
         self.similarity_scores = similarity_scores.squeeze()
 
         if model is None:
-            self.model = LinearRegression()
+            self.model = LinearRegression()            
         else:
             self.model = model
 
@@ -262,12 +262,17 @@ class GurobiIP():
        
         for index in tqdm(range(num_iter)):
             gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
-            self.sup_function(gurobi_solution, k)
-            c = self.model.predict(self.expanded_dataset)
-            c /= np.linalg.norm(c)
-            
-            if np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:])) < rho:
-            #if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
+            if self.model == "linearregressiontheoretical":
+                term1 = 1/(k**2) * np.sum(np.outer(self.dataset, self.dataset.T))
+                term2 = 1/(k*self.m) * np.sum(np.outer(self.dataset, self.curation_set.T))
+                term3 = 1/(self.m**2) * np.sum(np.outer(self.curation_set, self.curation_set.T))
+                mpr = term1+term2+term3 
+            else:
+                self.sup_function(gurobi_solution, k)
+                c = self.model.predict(self.expanded_dataset)
+                c /= np.linalg.norm(c)
+                mpr = np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:]))
+            if mpr < rho:
                 print("constraints satisfied, exiting early")
                 print("\t", np.abs(np.sum((gurobi_solution/k)*c[self.n:])-np.sum((1/self.m)*c[self.n:])))
                 print("\t", rho)
@@ -343,11 +348,19 @@ class GurobiLP():
        
         for index in tqdm(range(num_iter)):
             gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
-            self.sup_function(gurobi_solution, k)
-            c = self.model.predict(self.expanded_dataset)
-            c /= np.linalg.norm(c)
+
+            if self.model == "linearregressiontheoretical":
+                term1 = 1/(k**2) * np.sum(np.outer(self.dataset, self.dataset.T))
+                term2 = 1/(k*self.m) * np.sum(np.outer(self.dataset, self.curation_set.T))
+                term3 = 1/(self.m**2) * np.sum(np.outer(self.curation_set, self.curation_set.T))
+                mpr = term1+term2+term3 
+            else:
+                self.sup_function(gurobi_solution, k)
+                c = self.model.predict(self.expanded_dataset)
+                c /= np.linalg.norm(c)
+                mpr = np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:]))
             
-            if np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:])) < rho:
+            if mpr < rho:
             #if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
                 print("constraints satisfied, exiting early")
                 print("\t", np.abs(np.sum((gurobi_solution/k)*c[self.n:])-np.sum((1/self.m)*c[self.n:])))
@@ -372,7 +385,6 @@ class GurobiLP():
         self.problem.addConstr(((1/k)*sum_a_c - (1/self.m)*sum_c) >= -rho, name="neg_linear_constraint_{}".format(linear_constraint_index))
         self.problem.optimize()
         self.problem.update()
-
 
     def sup_function(self, a, k):
         curation_indicator = np.concatenate((np.zeros(a.shape[0]), np.ones(self.curation_set.shape[0])))
@@ -401,9 +413,10 @@ class ClipClip():
         self.orderings = orderings
 
     def fit(self, k, num_cols_to_drop, query_embedding):
-
-        clip_features = self.features[:, self.orderings[num_cols_to_drop:]]
-        clip_query = query_embedding[:, self.orderings[num_cols_to_drop:]]
+        indices = self.orderings[num_cols_to_drop:]
+        indices = np.sort(indices)
+        clip_features = self.features[:, indices]
+        clip_query = query_embedding[:, indices]
         # clip_features = torch.index_select(torch.tensor(self.features), 1, torch.tensor(self.orderings[num_cols_to_drop:].copy()).to(self.device))
         # clip_query = torch.index_select(torch.tensor(query_embedding), 1, torch.tensor(self.orderings[num_cols_to_drop:].copy()).to(self.device))
 
@@ -425,6 +438,8 @@ class PBM():
         self.pbm_classes = pbm_classes
 
     def fit(self, k=10, eps=0):
+        print(self.similarities.squeeze().shape(), flush=True)
+        print(np.argsort(self.similarities.squeeze()).shape(), flush=True)
         similarities_sorted = np.argsort(self.similarities.squeeze())[::-1]
         selections = []
 
