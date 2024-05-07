@@ -1,0 +1,45 @@
+administrative assistant
+announcer
+author
+bartender
+biologist
+building inspector
+bus driver
+butcher
+chef
+chemist
+childcare worker
+crane operator
+custodian
+customer service representative
+doctor
+drafter
+electrician
+engineer
+garbage collector
+housekeeper
+librarian
+mail carrier
+nurse
+nurse practitioner
+pharmacist
+pilot
+plumber
+police officer
+primary school teacher
+receptionist
+roofer
+software developer
+special ed teacher
+telemarketer
+truck driver
+chief executive officer
+computer programmer
+construction worker
+insurance sales agent
+security guard
+technical writer
+lab tech
+welder
+cook
+optician
