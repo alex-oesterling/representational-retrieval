@@ -218,16 +218,10 @@ def main():
                 print("Shared labels for {}, {}:".format(args.dataset, args.curation_dataset))
                 ret_indices = []
                 cur_indices = []
-                # attribute_indices = []
                 for lab in d.keys():
                     print(lab)
                     ret_indices.append(d[lab][0]) if isinstance(d[lab][0], int) else ret_indices.extend(d[lab][0])
                     cur_indices.append(d[lab][1]) if isinstance(d[lab][1], int) else cur_indices.extend(d[lab][1])
-                    # if isinstance(d[lab][0], list):
-                    #     for _ in range(len(d[lab][0])):
-                    #         attribute_indices.append(lab) 
-                    # else:
-                    #     attribute_indices.append(lab)
             print(ret_indices)
             print(cur_indices)
             curation_labels_full = curation_labels
@@ -252,6 +246,8 @@ def main():
 
         # compute similarities
         s = retrieval_features @ q_emb.T
+
+        s = s.numpy()
 
         torch.cuda.empty_cache()
 
@@ -395,8 +391,6 @@ def main():
         elif args.method == "debiasclip":
             # return top k similarities
             top_indices = np.zeros(n)
-            print(np.argsort(s.squeeze()).shape(), flush=True)
-            print(s.squeeze().shape(), flush=True)
             selection = np.argsort(s.squeeze())[::-1][:args.k]
             # print(s)
             top_indices[selection] = 1
@@ -412,12 +406,26 @@ def main():
         elif args.method == "clipclip":
             # get the order of columns to drop to reduce MI with sensitive attributes (support intersectional groups)
             if curation_dataset is not None:
-                # sensitive_attributes_idx = selected_attribute_indices
-                print(curation_labels_full.shape)
-                gender_MI_order = return_feature_MI_order(curation_features, curation_labels_full, [0,1,2,3,4,5,6,7,8])
+                if args.dataset == "occupations":
+                    gender_idx = 0
+                elif args.dataset == "celeba":
+                    gender_idx = 20
+                elif args.dataset == "fairface":
+                    gender_idx = 0
+                elif args.dataset == "utkface":
+                    gender_idx = 0
+                gender_MI_order = return_feature_MI_order(curation_features, curation_labels_full, [gender_idx])
             else:
-                # sensitive_attributes_idx = selected_attribute_indices
-                gender_MI_order = return_feature_MI_order(retrieval_features, retrieval_labels, [20]) ## This is for CelebA
+                if args.dataset == "occupations":
+                    gender_idx = 0
+                elif args.dataset == "celeba":
+                    gender_idx = 20
+                elif args.dataset == "fairface":
+                    gender_idx = 0
+                elif args.dataset == "utkface":
+                    gender_idx = 0
+                gender_MI_order = return_feature_MI_order(retrieval_features, retrieval_labels, [gender_idx]) ## This is for CelebA
+                
             # run clipclip method
             solver = ClipClip(retrieval_features, gender_MI_order, args.device)
 
@@ -428,6 +436,7 @@ def main():
             selection_list = []
             # drop a range of columns
             for num_col in tqdm(cols_drop):
+                print(num_col)
                 indices, selection = solver.fit(args.k, num_col,q_emb) 
                 rep = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
                 sim = (s.T @ indices)
