@@ -16,18 +16,28 @@ import debias_clip as dclip
 import json
 
 def get_top_embeddings_labels_ids(dataset, query, embedding_model, datadir):
-    retrievaldir = os.path.join("/n/holylabs/LABS/calmon_lab/Lab/datasets",datadir, embedding_model,query)
-
-    embeddings = np.load(os.path.join(retrievaldir, "embeds.npy"))
-    labels = torch.zeros((embeddings.shape[0], dataset.labels.shape[1]))
-    indices = []
-    with open(os.path.join(retrievaldir, "images.txt"), "r") as f:
-        lines = f.readlines()
-        for i, line in enumerate(lines):
-            line = line.strip()
-            idx = dataset.img_paths.index(line+".jpg")
-            labels[i] = dataset.labels[idx]
-            indices.append(idx)
+    if datadir == "occupations": ## Occupations is so small no need to use all 10k
+        embeddings = []
+        filepath = "/n/holylabs/LABS/calmon_lab/Lab/datasets/occupations/"
+        for i, path in enumerate(dataset.img_paths):
+            image_id = os.path.relpath(path.split(".")[0], filepath)
+            embeddingpath = os.path.join(filepath, embedding_model, image_id+".pt")
+            embeddings.append(torch.load(embeddingpath))
+        embeddings = torch.stack(embeddings).cpu()
+        labels = dataset.labels
+        indices = torch.arange(embeddings.shape[0])
+    else:
+        retrievaldir = os.path.join("/n/holylabs/LABS/calmon_lab/Lab/datasets", datadir, embedding_model,query)
+        embeddings = np.load(os.path.join(retrievaldir, "embeds.npy"))
+        labels = torch.zeros((embeddings.shape[0], dataset.labels.shape[1]))
+        indices = []
+        with open(os.path.join(retrievaldir, "images.txt"), "r") as f:
+            lines = f.readlines()
+            for i, line in enumerate(lines):
+                line = line.strip()
+                idx = dataset.img_paths.index(line+".jpg")
+                labels[i] = dataset.labels[idx]
+                indices.append(idx)
     
     return embeddings, labels, indices
 
@@ -40,6 +50,7 @@ def main():
     parser.add_argument('-query', default="queries.txt", type=str)
     parser.add_argument('-k', default=10, type=int)
     parser.add_argument('-functionclass', default="randomforest", type=str)
+    parser.add_argument('-use_clip', action="store_true")
     args = parser.parse_args()
     print(args)
 
@@ -86,6 +97,8 @@ def main():
         reg_model = DecisionTreeRegressor(max_depth=5)
     elif args.functionclass == "mlp":
         reg_model = MLPRegressor([64, 64])
+    elif args.functionclass == "linearregressiontheoretical":
+        reg_model = "linearregressiontheoretical"
     else:
         print("Function class not supported.")
         exit()
@@ -174,7 +187,6 @@ def main():
     #     all_features = []
     #     all_labels = []
 
-    n = 10000
 
     with open(args.query, 'r') as f:
         queries = f.readlines()
@@ -193,13 +205,19 @@ def main():
             embedding_model,
             args.dataset
         )
+        
+        if curation_dataset is not None:
+            curation_features, curation_labels, curation_indices = get_top_embeddings_labels_ids(
+                curation_dataset,
+                q_tag,
+                embedding_model,
+                args.curation_dataset
+            )
+        else:
+            curation_features = None
+            curation_labels = None
 
-        curation_features, curation_labels, curation_indices = get_top_embeddings_labels_ids(
-            curation_dataset,
-            q_tag,
-            embedding_model,
-            args.curation_dataset
-        )
+        n = retrieval_labels.shape[0]
 
         with open('representational_retrieval/shared_labels.json') as f:
             d = json.load(f)[args.dataset][args.curation_dataset]
@@ -218,11 +236,15 @@ def main():
                     attribute_indices.append(lab)
             print(ret_indices)
             print(cur_indices)
-        curation_labels = curation_labels[:, cur_indices]
-        retrieval_labels = retrieval_labels[:, ret_indices]
+        curation_labels_full = curation_labels
+        if args.use_clip:
+            curation_labels = curation_features
+            retrieval_labels = retrieval_features
+        else:
+            curation_labels = curation_labels[:, cur_indices]
+            retrieval_labels = retrieval_labels[:, ret_indices]
 
-        print(curation_labels.shape)
-        print(retrieval_labels.shape)
+        print(retrieval_features.shape)
 
         with torch.no_grad():
             q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
@@ -321,15 +343,23 @@ def main():
             indices_list = []
             selection_list = []
             MMR_cost_list = []
+            old_index = None
             for p in tqdm(lambdas):
                 indices, diversity_cost, selection = solver.fit(args.k, p) 
+                # print(indices, flush=True)
                 rep = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
                 sims.append(sim)
+                print(sim, flush=True)
                 indices_list.append(indices)
                 selection_list.append(selection)
                 MMR_cost_list.append(diversity_cost)
+                if old_index is None:
+                    old_index = indices
+                else:
+                    print(np.sum(indices - old_index), flush=True)
+                    old_index = indices
 
             results['MPR'] = reps
             results['sims'] = sims
@@ -365,7 +395,10 @@ def main():
         elif args.method == "debiasclip":
             # return top k similarities
             top_indices = np.zeros(n)
+            print(np.argsort(s.squeeze()).shape(), flush=True)
+            print(s.squeeze().shape(), flush=True)
             selection = np.argsort(s.squeeze())[::-1][:args.k]
+            # print(s)
             top_indices[selection] = 1
             sims = s.T@top_indices
 
@@ -386,7 +419,7 @@ def main():
                         selected_attribute_indices.append(i)
             if curation_dataset is not None:
                 sensitive_attributes_idx = selected_attribute_indices
-                gender_MI_order = return_feature_MI_order(curation_features, curation_labels, sensitive_attributes_idx)
+                gender_MI_order = return_feature_MI_order(curation_features, curation_labels_full, [0,1,2])
             else:
                 sensitive_attributes_idx = selected_attribute_indices
                 gender_MI_order = return_feature_MI_order(retrieval_features, retrieval_labels, sensitive_attributes_idx)
@@ -451,7 +484,10 @@ def main():
                 results['selection'] = selection_list
         result_path = './results/alex/'
         q_title = q.split(" ")[-1]
-        filename_pkl = "{}_curation_{}_top10k_{}_{}_{}_{}.pkl".format(args.dataset, args.curation_dataset, args.method, args.k, args.functionclass, q_title)
+        if args.use_clip:
+            filename_pkl = "clip_{}_curation_{}_top10k_{}_{}_{}_{}.pkl".format(args.dataset, args.curation_dataset, args.method, args.k, args.functionclass, q_title)
+        else:
+            filename_pkl = "{}_curation_{}_top10k_{}_{}_{}_{}.pkl".format(args.dataset, args.curation_dataset, args.method, args.k, args.functionclass, q_title)
         if not os.path.exists(result_path):
             os.makedirs(result_path)
         with open(result_path + filename_pkl, 'wb') as f:
