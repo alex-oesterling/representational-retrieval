@@ -11,8 +11,8 @@ class ADMM():
 
     def step(self, Cb, Q_cho, a_star, u, k):
         an = torch.cholesky_solve(Cb + self.rho*(a_star - u), Q_cho)
-        a_starn = #FIXME #torch.where((an + u - self.retrieval_penalty/self.rho) > 0, an + u - self.retrieval_penalty/self.rho, 0)
-
+        #a_starn = #FIXME #torch.where((an + u - self.retrieval_penalty/self.rho) > 0, an + u - self.retrieval_penalty/self.rho, 0)
+        a_starn = 0 #TBD!!
         ## project onto hyperplane
         ones = torch.ones(an.size).to(self.device)
         proj_hyperplane = an-(torch.dot(ones, an)-k)/(torch.linalg.norm(ones)**2)*ones
