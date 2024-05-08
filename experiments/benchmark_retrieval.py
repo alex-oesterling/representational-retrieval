@@ -1,3 +1,5 @@
+import sys
+sys.path.append("../")
 from representational_retrieval import *
 import torch
 import numpy as np
@@ -261,7 +263,7 @@ def main():
             rounded_sims = []
             indices_list = []
             rounded_indices_list = []
-            rhos = np.linspace(0.005, 0.025, 20)
+            rhos = np.linspace(0.01, 0.02, 40)
             for rho in tqdm(rhos, desc="rhos"):
                 indices = solver.fit(args.k, num_iter, rho)
                 if indices is None: ## returns none if problem is infeasible
