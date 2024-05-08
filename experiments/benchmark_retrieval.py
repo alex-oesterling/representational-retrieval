@@ -1,6 +1,9 @@
 import sys
 sys.path.append("../")
-from representational_retrieval import *
+from representational_retrieval.datasets import *
+from representational_retrieval.admm import *
+from representational_retrieval.solvers import *
+from representational_retrieval.utils import *
 import torch
 import numpy as np
 from tqdm.auto import tqdm
