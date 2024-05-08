@@ -22,20 +22,19 @@ def oracle_function(indices, dataset, curation_set=None, model=None):
     return reg
 
 def getMPR(indices, dataset, k, curation_set=None, model=None):
-    if model is not None and model == "linearregressiontheoretical":
-        if curation_set is not None:
-            m = curation_set.shape[0]
-            term1 = 1/(k**2) * np.sum(np.outer(dataset, dataset.T))
-            term2 = 1/(k*m) * np.sum(np.outer(dataset, curation_set.T))
-            term3 = 1/(m**2) * np.sum(np.outer(curation_set, curation_set.T))
-            mpr = term1+term2+term3
-        else:
-            m = dataset.shape[0]
-            term1 = 1/(k**2) * np.sum(np.outer(dataset, dataset.T))
-            term2 = 1/(k*m) * np.sum(np.outer(dataset, dataset.T))
-            term3 = 1/(m**2) * np.sum(np.outer(dataset, dataset.T))
-            mpr = term1+term2+term3
-        return mpr
+    if model is not None:
+        if model == "linear":
+            if curation_set is not None:
+                m = curation_set.shape[0]
+                y = (1/k)*dataset.T@indices
+                cbar = (1/m)*curation_set.T@np.ones(m)
+                mpr = np.sqrt(np.linalg.norm(y-cbar))
+            else:
+                m = dataset.shape[0]
+                y = (1/k)*dataset.T@indices
+                cbar = (1/m)*dataset.T@np.ones(m)
+                mpr = np.sqrt(np.linalg.norm(y-cbar))
+            return mpr
 
     reg = oracle_function(indices, dataset, curation_set=curation_set, model=model)
 

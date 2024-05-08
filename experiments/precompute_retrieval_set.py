@@ -72,7 +72,7 @@ def main():
         else:
             q = torch.cat((q, q_emb), dim=0)
 
-    k = 10000                        
+    k = min(10000, embeds.shape[0])                        
 
     D, I = index.search(q, k)     # actual search
 

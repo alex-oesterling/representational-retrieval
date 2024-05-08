@@ -93,14 +93,14 @@ def main():
 
     if args.functionclass == "randomforest":
         reg_model = RandomForestRegressor(max_depth=2)
-    elif args.functionclass == "linearregression":
-        reg_model = LinearRegression()
+    # elif args.functionclass == "linearregression":
+    #     reg_model = LinearRegression()
     elif args.functionclass == "decisiontree":
         reg_model = DecisionTreeRegressor(max_depth=5)
     elif args.functionclass == "mlp":
         reg_model = MLPRegressor([64, 64])
-    elif args.functionclass == "linearregressiontheoretical":
-        reg_model = "linearregressiontheoretical"
+    elif args.functionclass == "linear":
+        reg_model = "linear"
     else:
         print("Function class not supported.")
         exit()
@@ -253,7 +253,10 @@ def main():
 
         results = {}
         if args.method == "lp":
-            solver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
+            if reg_model == "linear":
+                solver = BoundedLinearLP(s, retrieval_labels, curation_set=curation_labels)
+            else:
+                solver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
 
             num_iter = 50
 
@@ -265,7 +268,10 @@ def main():
             rounded_indices_list = []
             rhos = np.linspace(0.01, 0.02, 40)
             for rho in tqdm(rhos, desc="rhos"):
-                indices = solver.fit(args.k, num_iter, rho)
+                if args.functionclass == "linear":
+                    indices = solver.fit(args.k, rho)
+                else:
+                    indices = solver.fit(args.k, num_iter, rho)
                 if indices is None: ## returns none if problem is infeasible
                     continue
                 indices_rounded = indices.copy()
@@ -298,7 +304,11 @@ def main():
             solver.problem.dispose()
             del solver
         elif args.method == "ip":
-            solver = GurobiIP(s, retrieval_labels, curation_set=curation_labels, model = reg_model)
+            if reg_model == "linear":
+                print("Need to implement linear q program for IP.")
+                exit()
+            else:
+                solver = GurobiIP(s, retrieval_labels, curation_set=curation_labels, model = reg_model)
 
             num_iter = 50
 
@@ -488,6 +498,8 @@ def main():
                 results['selection'] = selection_list
         result_path = './results/alex/'
         q_title = q.split(" ")[-1]
+        print("MPR: ", results['MPR'])
+        print("sims: ", results['sims'])
         if args.use_clip:
             filename_pkl = "clip_{}_curation_{}_top10k_{}_{}_{}_{}.pkl".format(args.dataset, args.curation_dataset, args.method, args.k, args.functionclass, q_title)
         else:
