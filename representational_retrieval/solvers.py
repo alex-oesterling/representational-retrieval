@@ -534,8 +534,6 @@ class PBM():
         self.pbm_classes = pbm_classes
 
     def fit(self, k=10, eps=0):
-        print(self.similarities.squeeze().shape(), flush=True)
-        print(np.argsort(self.similarities.squeeze()).shape(), flush=True)
         similarities_sorted = np.argsort(self.similarities.squeeze())[::-1]
         selections = []
 
