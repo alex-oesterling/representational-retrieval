@@ -184,11 +184,11 @@ def main():
         rep_upper_bound = np.mean(rep_upper_bounds)
         print("sim_upper_bound, rep_upper_bound: {}, {}".format(sim_upper_bound, rep_upper_bound))
 
-        random_indices = np.zeros(n)
         
         random_sims = []
         random_reps = []
         for _ in range(10):
+            random_indices = np.zeros(n)
             random_selection = np.random.choice(np.arange(n), args.k, replace=False)
             random_indices[random_selection] = 1
             random_sim2 = s.T@random_indices
