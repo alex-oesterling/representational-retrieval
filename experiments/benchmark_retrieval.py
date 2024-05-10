@@ -58,8 +58,8 @@ def main():
     args = parser.parse_args()
     print(args)
 
-    np.random.seed(1017)
-    print(sklearn.utils.check_random_state())
+    # np.random.seed(1017)
+    # print(sklearn.utils.check_random_state())
 
     if args.method != "debiasclip":
         embedding_model = "clip"
@@ -178,7 +178,7 @@ def main():
         top_indices[selection] = 1
         sim_upper_bound = s.T@top_indices
         rep_upper_bounds = []
-        for i in range(10):
+        for _ in range(10):
             rep_upper_bounds.append(getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model))
         print(rep_upper_bounds)
         rep_upper_bound = np.mean(rep_upper_bounds)
