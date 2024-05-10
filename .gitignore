@@ -163,7 +163,6 @@ cython_debug/
 slurm_out/*
 results/*.png
 
-results/old/*
-results/carol/*
+results/*
 
 environment.yml

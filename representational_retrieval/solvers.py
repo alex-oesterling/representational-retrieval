@@ -262,16 +262,17 @@ class GurobiIP():
        
         for index in tqdm(range(num_iter)):
             gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
-            if self.model == "linearregressiontheoretical":
-                term1 = 1/(k**2) * np.sum(np.outer(self.dataset, self.dataset.T))
-                term2 = 1/(k*self.m) * np.sum(np.outer(self.dataset, self.curation_set.T))
-                term3 = 1/(self.m**2) * np.sum(np.outer(self.curation_set, self.curation_set.T))
-                mpr = term1+term2+term3 
-            else:
-                self.sup_function(gurobi_solution, k)
-                c = self.model.predict(self.expanded_dataset)
-                c /= np.linalg.norm(c)
-                mpr = np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:]))
+            # if self.model == "linearrkhs":
+            #     term1 = 1/(k**2) * np.sum(np.outer(self.dataset, self.dataset.T))
+            #     term2 = 1/(k*self.m) * np.sum(np.outer(self.dataset, self.curation_set.T))
+            #     term3 = 1/(self.m**2) * np.sum(np.outer(self.curation_set, self.curation_set.T))
+            #     mpr = np.sqrt(term1+term2+term3)
+            # else:
+            self.sup_function(gurobi_solution, k)
+            c = self.model.predict(self.expanded_dataset)
+            c /= np.linalg.norm(c)
+            c *= c.shape[0]
+            mpr = np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:]))
             if mpr < rho:
                 print("constraints satisfied, exiting early")
                 print("\t", np.abs(np.sum((gurobi_solution/k)*c[self.n:])-np.sum((1/self.m)*c[self.n:])))
@@ -309,6 +310,7 @@ class GurobiIP():
         c = self.model.predict(self.dataset)
         print("norm", np.linalg.norm(c), flush=True)
         c /= np.linalg.norm(c)
+        c *= c.shape[0]
         rep = np.abs(np.sum((1/k)*indices*c-(1/self.m)*c))
         return rep
 
@@ -349,16 +351,17 @@ class GurobiLP():
         for index in tqdm(range(num_iter)):
             gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
 
-            # if self.model == "linearregressiontheoretical":
-            #     term1 = 1/(k**2) * np.sum(np.outer(self.dataset, self.dataset.T))
-            #     term2 = 1/(k*self.m) * np.sum(np.outer(self.dataset, self.curation_set.T))
-            #     term3 = 1/(self.m**2) * np.sum(np.outer(self.curation_set, self.curation_set.T))
-            #     mpr = term1+term2+term3 
-            # else:
-            self.sup_function(gurobi_solution, k)
-            c = self.model.predict(self.expanded_dataset)
-            c /= np.linalg.norm(c)
-            mpr = np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:]))
+            if self.model == "linearrkhs":
+                term1 = 1/(k**2) * np.sum(np.outer(self.dataset, self.dataset.T))
+                term2 = 1/(k*self.m) * np.sum(np.outer(self.dataset, self.curation_set.T))
+                term3 = 1/(self.m**2) * np.sum(np.outer(self.curation_set, self.curation_set.T))
+                mpr = np.sqrt(term1+term2+term3)
+            else:
+                self.sup_function(gurobi_solution, k)
+                c = self.model.predict(self.expanded_dataset)
+                c /= np.linalg.norm(c)
+                c *= c.shape[0]
+                mpr = np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:]))
             
             if mpr < rho:
             #if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
@@ -397,6 +400,7 @@ class GurobiLP():
         c = self.model.predict(self.dataset)
         print("norm", np.linalg.norm(c), flush=True)
         c /= np.linalg.norm(c)
+        c *= c.shape[0]
         rep = np.abs(np.sum((1/k)*indices*c-(1/self.m)*c))
         return rep
 
@@ -422,84 +426,36 @@ class BoundedLinearLP():
         self.similarity_scores = similarity_scores.squeeze()
 
     def fit(self, k, rho):
-        self.problem = gp.Model("mixed_integer_optimization")
+        self.problem = gp.Model("linear_rkhs_lp")
         self.a = self.problem.addVars(self.n, lb=0, ub=1, vtype=GRB.CONTINUOUS, name="a")
         obj = gp.quicksum(self.similarity_scores[i]*self.a[i] for i in range(self.m))
         self.problem.setObjective(obj, sense=GRB.MAXIMIZE)
+        # self.problem.addConstr(obj >= rho, "constraint_sim")
         self.problem.addConstr(sum([self.a[i] for i in range(self.n)]) == k, "constraint_sum_a")
 
-        # cp.sum_squares(self.y-self.cbar)
-        y = []
-        for i in range(self.dataset.shape[1]):
-            y.append((1/k)*sum([self.a[j]*self.dataset[j,i] for j in range(self.n)]))
-        cbar = []
-        for i in range(self.dataset.shape[1]):
-            cbar.append((1/self.m)*sum([self.curation_set[j,i] for j in range(self.m)]))
+        filtered_dataset = [self.dataset[i, :]*self.a[i] for i in range(self.n)]
 
-        self.problem.addQConstr(sum([y[i]*cbar[i] for i in range(len(y))]) <= rho**2, "qconstraint")
+        term1 = 1/(k**2)*sum([filtered_dataset[i]@filtered_dataset[j] for i in range(self.n) for j in range(self.n)])
+        term2 = 2/(k*self.m)*sum([filtered_dataset[i]@self.curation_set[j, :] for i in range(self.n) for j in range(self.m)])
+        term3 = 1/(self.m**2)*sum([self.curation_set[i, :]@self.curation_set[j, :] for i in range(self.m) for j in range(self.m)])
+        obj2 = term1-term2+term3
+
+        self.problem.addQConstr(term1-term2+term3 <= rho**2, "qconstraint")
+        # self.problem.setObjective(obj2, sense=GRB.MINIMIZE)
 
         self.problem.optimize()
+        self.problem.update()
+
+        if self.problem.status == 3:
+                print("Constraints infeasible, rho = {}".format(rho))
+                print(self.problem.NumConstrs)
+                return None
 
         gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
 
-        # for index in tqdm(range(num_iter)):
-        #     gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
-
-        #     if self.model == "linearregressiontheoretical":
-        #         term1 = 1/(k**2) * np.sum(np.outer(self.dataset, self.dataset.T))
-        #         term2 = 1/(k*self.m) * np.sum(np.outer(self.dataset, self.curation_set.T))
-        #         term3 = 1/(self.m**2) * np.sum(np.outer(self.curation_set, self.curation_set.T))
-        #         mpr = term1+term2+term3 
-        #     else:
-        #         self.sup_function(gurobi_solution, k)
-        #         c = self.model.predict(self.expanded_dataset)
-        #         c /= np.linalg.norm(c)
-        #         mpr = np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:]))
-            
-        #     if mpr < rho:
-        #     #if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
-        #         print("constraints satisfied, exiting early")
-        #         print("\t", np.abs(np.sum((gurobi_solution/k)*c[self.n:])-np.sum((1/self.m)*c[self.n:])))
-        #         print("\t", rho)
-        #         break
-            
-        #     self.max_similarity(c, k, rho, index)
-
-        #     if self.problem.status == 3:
-        #         print("Constraints infeasible, rho = {}".format(rho))
-        #         print(self.problem.NumConstrs)
-        #         return None
-        #     else:
-        #         print(self.problem.ObjVal)
         return gurobi_solution
 
-
-    # def max_similarity(self, c, k, rho, linear_constraint_index):
-    #     sum_a_c = gp.quicksum([self.a[i] * c[:self.n][i] for i in range(self.n)])
-    #     sum_c = gp.quicksum(c[self.n:])
-    #     self.problem.addConstr(((1/k)*sum_a_c - (1/self.m)*sum_c) <= rho, name="linear_constraint_{}".format(linear_constraint_index))
-    #     self.problem.addConstr(((1/k)*sum_a_c - (1/self.m)*sum_c) >= -rho, name="neg_linear_constraint_{}".format(linear_constraint_index))
-    #     self.problem.optimize()
-    #     self.problem.update()
-
-    # def sup_function(self, a, k):
-    #     curation_indicator = np.concatenate((np.zeros(a.shape[0]), np.ones(self.curation_set.shape[0])))
-    #     a_expanded = np.concatenate((a, np.zeros(self.curation_set.shape[0])))
-    #     alpha = (a_expanded/k - curation_indicator/self.m)
-    #     self.model.fit(self.expanded_dataset, alpha)
-    
-    # def get_representation(self, indices, k):
-    #     self.sup_function(indices, k)
-    #     c = self.model.predict(self.dataset)
-    #     print("norm", np.linalg.norm(c), flush=True)
-    #     c /= np.linalg.norm(c)
-    #     rep = np.abs(np.sum((1/k)*indices*c-(1/self.m)*c))
-    #     return rep
-
-    # def get_similarity(self, indices):
-    #     sim = indices.T@self.similarity_scores
-    #     return sim
-    
+       
 class ClipClip():
     # As defined in the paper "Are Gender-Neutral Queries Really Gender-Neutral? Mitigating Gender Bias in Image Search" (Wang et. al. 2021)
     def __init__(self, features, orderings=None, device='cuda'):

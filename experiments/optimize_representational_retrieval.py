@@ -16,7 +16,7 @@ def main():
     parser.add_argument('-device', default="cuda", type=str)
     parser.add_argument('-dataset', default="celeba", type=str)
     parser.add_argument('-n_samples', default=10000, type=int)
-    parser.add_argument('-cutting_planes', default=10, type=int)
+    parser.add_argument('-cutting_planes', default=50, type=int)
     parser.add_argument('-query', default="A photo of a CEO", type=str)
     parser.add_argument('-k', default=10, type=int)
     parser.add_argument('-functionclass', default="linearregression", type=str)

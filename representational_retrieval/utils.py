@@ -1,6 +1,7 @@
 import numpy as np 
 from sklearn.linear_model import LinearRegression
 import sklearn.feature_selection as fs
+import cvxpy as cp
 
 def oracle_function(indices, dataset, curation_set=None, model=None):
     if model is None:
@@ -23,17 +24,20 @@ def oracle_function(indices, dataset, curation_set=None, model=None):
 
 def getMPR(indices, dataset, k, curation_set=None, model=None):
     if model is not None:
-        if model == "linear":
+        if model == "linearrkhs":
             if curation_set is not None:
                 m = curation_set.shape[0]
-                y = (1/k)*dataset.T@indices
-                cbar = (1/m)*curation_set.T@np.ones(m)
-                mpr = np.sqrt(np.linalg.norm(y-cbar))
+                print((dataset*indices).shape, flush=True)
+                term1 = 1/(k**2) * np.sum((dataset*indices)@(dataset*indices).T)
+                term2 = 2/(k*m) * np.sum((dataset*indices)@curation_set.T)
+                term3 = 1/(m**2) * np.sum(curation_set@curation_set.T)
+                mpr = np.sqrt(term1-term2+term3)
             else:
                 m = dataset.shape[0]
-                y = (1/k)*dataset.T@indices
-                cbar = (1/m)*dataset.T@np.ones(m)
-                mpr = np.sqrt(np.linalg.norm(y-cbar))
+                term1 = 1/(k**2) * np.sum((dataset*indices)@(dataset*indices).T)
+                term2 = 2/(k*m) * np.sum((dataset*indices)@dataset.T)
+                term3 = 1/(m**2) * np.sum(dataset@dataset.T)
+                mpr = np.sqrt(term1-term2+term3)
             return mpr
 
     reg = oracle_function(indices, dataset, curation_set=curation_set, model=model)
@@ -43,11 +47,13 @@ def getMPR(indices, dataset, k, curation_set=None, model=None):
         m = curation_set.shape[0]
         c = reg.predict(expanded_dataset)
         c /= np.linalg.norm(c)
+        c *= c.shape[0]
         mpr = np.abs(np.sum((indices/k)*c[:dataset.shape[0]]) - np.sum((1/m)*c[dataset.shape[0]:]))
     else:
         m = dataset.shape[0]
         c = reg.predict(dataset)
         c /= np.linalg.norm(c)
+        c *= c.shape[0]
         mpr = np.abs(np.sum((indices/k)*c) - np.sum((1/m)*c))
     
     return mpr
@@ -93,6 +99,32 @@ def return_feature_MI_order(features, data, sensitive_attributes, n_neighbors = 
     feature_MI = calc_feature_MI(features, labels, n_neighbors, rs)
     feature_order = np.argsort(feature_MI)[::-1]
     return feature_order
+
+def get_lower_upper_bounds(k, similarity_scores, labels, curation_labels):
+    if curation_labels is None:
+        curation_labels = labels
+    a = cp.Variable(labels.shape[0])
+    curation_mean = np.mean(curation_labels, axis=0)
+    
+    objective = cp.Maximize(similarity_scores.T @ a)
+    constraints = [(labels.T @ a)/k == curation_mean, sum(a)==k, 0<=a, a<=1]
+    prob = cp.Problem(objective, constraints)
+    prob.solve(solver=cp.ECOS)
+    lb_opt = objective.value
+
+    lb_indices = a.value
+
+
+    #  find global optimal
+    objective = cp.Maximize(similarity_scores.T @ a)
+    constraints = [sum(a)==k, 0<=a, a<=1]
+    prob = cp.Problem(objective, constraints)
+    prob.solve(solver=cp.ECOS)
+    global_opt = objective.value
+
+    ub_indices = a.value
+
+    return lb_indices, ub_indices
 
 # for PBM
 def fon(l):

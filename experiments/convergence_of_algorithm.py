@@ -1,22 +1,49 @@
+import sys
+sys.path.append(sys.path[0] + "/..")
 from representational_retrieval import *
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from tqdm.auto import tqdm
 import argparse
-import pickle
 import seaborn as sns
 import clip
 from sklearn.ensemble import RandomForestRegressor
-from torch.utils.data import DataLoader
 sns.set_style("whitegrid")
+
+
+def get_top_embeddings_labels_ids(dataset, query, embedding_model, datadir):
+    if datadir == "occupations": ## Occupations is so small no need to use all 10k
+        embeddings = []
+        filepath = "/n/holylabs/LABS/calmon_lab/Lab/datasets/occupations/"
+        for i, path in enumerate(dataset.img_paths):
+            image_id = os.path.relpath(path.split(".")[0], filepath)
+            embeddingpath = os.path.join(filepath, embedding_model, image_id+".pt")
+            embeddings.append(torch.load(embeddingpath))
+        embeddings = torch.nn.functional.normalize(torch.stack(embeddings), dim=1).cpu().numpy()
+        labels = dataset.labels.numpy()
+        indices = torch.arange(embeddings.shape[0])
+    else:
+        retrievaldir = os.path.join("/n/holylabs/LABS/calmon_lab/Lab/datasets", datadir, embedding_model,query)
+        embeddings = np.load(os.path.join(retrievaldir, "embeds.npy"))
+        embeddings /= np.linalg.norm(embeddings, axis=1)
+        labels = np.zeros((embeddings.shape[0], dataset.labels.shape[1]))
+        indices = []
+        with open(os.path.join(retrievaldir, "images.txt"), "r") as f:
+            lines = f.readlines()
+            for i, line in enumerate(lines):
+                line = line.strip()
+                idx = dataset.img_paths.index(line+".jpg")
+                labels[i] = dataset.labels[idx].numpy()
+                indices.append(idx)
+    
+    return embeddings, labels, indices
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-device', default="cuda", type=str)
     parser.add_argument('-dataset', default="celeba", type=str)
     parser.add_argument('-n_samples', default=10000, type=int)
-    parser.add_argument('-query', default="A photo of a CEO", type=str)
+    parser.add_argument('-query', default="A photo of a doctor", type=str)
     parser.add_argument('-k', default=10, type=int)
     parser.add_argument('-functionclass', default="linearregression", type=str)
     args = parser.parse_args()
@@ -39,56 +66,10 @@ def main():
     if args.functionclass == "randomforest":
         oracle = RandomForestRegressor(max_depth=2)
     elif args.functionclass == "linearregression":
-        oracle = LinearRegression()
+        oracle = LinearRegression(fit_intercept=False)
     else:
         print("Function class not supported.")
         exit()
-    
-    batch_size = 512
-
-    dataset_path = "/n/holylabs/LABS/calmon_lab/Lab/datasets/"
-
-    if args.dataset+'_clipfeatures.npy' in os.listdir(dataset_path):
-        print("clip features, labels already processed")
-        retrieval_features = np.load(dataset_path+args.dataset+'_clipfeatures.npy')
-        retrieval_labels = np.load(dataset_path+args.dataset+'_cliplabels.npy')
-    else:
-        retrieval_features = []
-        retrieval_labels = []
-        ix = 0
-        with torch.no_grad():
-            for images, labels in tqdm(DataLoader(dataset, batch_size=batch_size)):
-                features = model.encode_image(images.to(args.device))
-
-                retrieval_features.append(features)
-                retrieval_labels.append(labels)
-
-                ix += batch_size
-                if ix>=args.n_samples:
-                    break
-
-        retrieval_features, retrieval_labels = torch.cat(retrieval_features).cpu().numpy(), torch.cat(retrieval_labels).cpu().numpy()
-        np.save(dataset_path+ args.dataset+'_clipFeatures.npy', retrieval_features)
-        np.save(dataset_path+ args.dataset+'_clipLabels.npy', retrieval_labels)
-
-    batch_size = 512
-
-    # all_features = []
-    # all_labels = []
-    # ix = 0
-    # with torch.no_grad():
-    #     for images, labels in tqdm(DataLoader(dataset, batch_size=batch_size)):
-    #         features = model.encode_image(images.to(args.device))
-
-    #         all_features.append(features)
-    #         all_labels.append(labels)
-
-    #         ix += batch_size
-    #         if ix>=args.n_samples:
-    #             break
-
-    # features, labels = torch.cat(all_features).cpu().numpy(), torch.cat(all_labels).cpu().numpy()
-    m = retrieval_labels.shape[0]
 
     q = args.query
 
@@ -97,8 +78,14 @@ def main():
         q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
     q_emb = q_emb/np.linalg.norm(q_emb)
 
-    retrieval_features = retrieval_features.astype(np.float64)
-    retrieval_features = retrieval_features/ np.linalg.norm(retrieval_features, axis=1, keepdims=True)  # Calculate L2 norm for each row
+    retrieval_features, retrieval_labels, retrieval_indices = get_top_embeddings_labels_ids(
+        dataset,
+        "a doctor",
+        "clip",
+        args.dataset
+    )
+
+    m = retrieval_labels.shape[0]
 
     # compute similarities
     s = retrieval_features @ q_emb.T
@@ -123,7 +110,7 @@ def main():
     gurobi_indices_list = []
     rhoslist = []
     rho = 0.01
-    iters = [1,2,5,10,20,50,100]
+    iters = [1,2,5,10,20,50]
     for num_iters in iters:
         indices = solver2.fit(args.k, num_iters, rho)
         if indices is None:
@@ -183,7 +170,7 @@ def main():
     ax.set_ylabel('Representation')
     ax2.set_ylabel('Similarity')
     # ax2.legend(loc=0)
-    plt.savefig("./results/iterstest_{}_{}_nsamples_{}_k_{}.png".format(args.functionclass, args.dataset, args.n_samples, args.k))
+    plt.savefig("./results/iterstest_{}_{}_k_{}.png".format(args.functionclass, args.dataset, args.k))
     
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -203,7 +190,7 @@ def main():
     ax.set_ylabel('Representation')
     # ax2.set_ylabel('Similarity')
     # ax2.legend(loc=0)
-    plt.savefig("./results/iterstest_nosims_{}_{}_nsamples_{}_k_{}.png".format(args.functionclass, args.dataset, args.n_samples, args.k))
+    plt.savefig("./results/iterstest_nosims_{}_{}_k_{}.png".format(args.functionclass, args.dataset, args.k))
 
     # plt.figure()
     # plt.title("Oracle, {}, {}".format(args.functionclass, args.dataset))
