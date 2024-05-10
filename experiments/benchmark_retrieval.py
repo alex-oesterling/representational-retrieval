@@ -277,7 +277,7 @@ def main():
             rounded_sims = []
             indices_list = []
             rounded_indices_list = []
-            rhos = np.linspace(0.005, 0.025, 20)
+            rhos = np.linspace(random_rep, rep_upper_bound, 50)
             for rho in tqdm(rhos, desc="rhos"):
                 indices = solver.fit(args.k, num_iter, rho)
                 
