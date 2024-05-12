@@ -127,15 +127,12 @@ def main():
         q = "A photo of "+ q_org
         q_tag = q.split(" ")[-1]
         print(q)
-        # q_emb = np.load("representational_retrieval/queries/{}_{}.npy".format(embedding_model, q_tag))
+        q_emb = np.load("representational_retrieval/queries/{}_{}.npy".format(embedding_model, q_tag))
         q_token = clip.tokenize(q).to(args.device)
 
-        with torch.no_grad():
-            q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
-        q_emb = q_emb/np.linalg.norm(q_emb)
-
-        np.save("representational_retrieval/queries/{}_{}.npy".format(embedding_model, q_tag), q_emb)
-        continue
+        # with torch.no_grad():
+        #     q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
+        # q_emb = q_emb/np.linalg.norm(q_emb)
 
         retrieval_features, retrieval_labels, retrieval_indices = get_top_embeddings_labels_ids(
             dataset,
@@ -237,7 +234,7 @@ def main():
 
             # rhos = np.linspace(lb, ub, 40)[::-1]
             for rho in tqdm(rhos, desc="rhos"):
-                indices = solver.fit(args.k, num_iter, rho)
+                indices = solver.fit(args.k, num_iter, rho, top_indices)
                 if indices is None: ## returns none if problem is infeasible
                     continue
                 
