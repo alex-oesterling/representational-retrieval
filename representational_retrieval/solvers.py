@@ -94,17 +94,14 @@ class BoundedLinearModels():
     
 # MMR algorithm defined in PATHS using CLIP embedding
 class MMR():
-    def __init__(self, similarity_scores, retreival_embeddings, curation_embeddings=None):
+    def __init__(self, similarity_scores, retreival_embeddings):
         self.m = similarity_scores.shape[0]
         self.similarity_scores = similarity_scores
         # define what embedding to use for the diversity metric.
         # None (img itself), CLIP, or CLIP+PCA
         self.embeddings = retreival_embeddings # the entire dataset (also used for retrieval), or a separate curation set
-        if curation_embeddings is None: ## If curation set provided, estimate means over it.
-            self.mean_embedding = None
-            self.std_embedding = None
-        else:
-            self.mean_embedding, self.std_embedding =  statEmbedding(curation_embeddings)
+        self.mean_embedding = None
+        self.std_embedding = None
 
     def fit(self, k, lambda_):
         if self.mean_embedding is None or self.std_embedding is None:
@@ -124,13 +121,16 @@ class MMR():
                     continue
                 # temporary select the jth element
                 indices[j] = 1
-                MMR_temp[j] = (1-lambda_)* self.similarity_scores.T @ indices + lambda_ * self.marginal_diversity_score(indices,j)
+                score_sim = (self.similarity_scores.T @ indices - self.mean_embedding)/self.std_embedding
+                score_diversity = self.marginal_diversity_score(indices,j)
+                MMR_temp[j] = (1-lambda_)* score_sim + lambda_ * score_diversity
                 indices[j] = 0
             # select the element with the highest MMR 
             idx = np.argmax(MMR_temp)
             selection.append(idx)
             indices[np.argmax(MMR_temp)] = 1
         AssertionError(np.sum(indices)==k)
+        print(selection)
         MMR_cost = self.marginal_diversity_score(indices)
         return indices, MMR_cost, selection
 
@@ -324,14 +324,19 @@ class GurobiLP():
         self.n = dataset.shape[0]
         self.d = dataset.shape[1]
         self.dataset = dataset
+        self.problem = None
 
-        if curation_set is None: ## If no curation set is provided, compute MPR over the retrieval set
-            self.curation_set = self.dataset
+        # if curation_set is None: ## If no curation set is provided, compute MPR over the retrieval set
+        #     self.curation_set = self.dataset
+        # else:
+        #     self.curation_set = curation_set
+        self.curation_set = curation_set
+        if curation_set is None:
+            self.m = self.dataset.shape[0]
+            self.expanded_dataset = np.concatenate((self.dataset, self.dataset), axis=0)
         else:
-            self.curation_set = curation_set
-        self.m = self.curation_set.shape[0]
-
-        self.expanded_dataset = np.concatenate((self.dataset, self.curation_set), axis=0)
+            self.m =  self.curation_set.shape[0]
+            self.expanded_dataset = np.concatenate((self.dataset, self.curation_set), axis=0)
 
         self.similarity_scores = similarity_scores.squeeze()
 
@@ -340,33 +345,42 @@ class GurobiLP():
         else:
             self.model = model
 
-    def fit(self, k, num_iter, rho):
+    def fit(self, k, num_iter, rho, KNN_indices):
+        # check if rho is satisfied, just return KNN_indices
+        mpr, _ = getMPR(KNN_indices, self.dataset, k, self.curation_set, self.model)
+        print("mpr in solver", mpr)
+        if mpr <= rho:
+            print("no solve is required, returning KNN indices")
+            return KNN_indices
+        
         self.problem = gp.Model("mixed_integer_optimization")
         self.a = self.problem.addVars(self.n, lb=0, ub=1, vtype=GRB.CONTINUOUS, name="a")
         obj = gp.quicksum(self.similarity_scores[i]*self.a[i] for i in range(self.m))
         self.problem.setObjective(obj, sense=GRB.MAXIMIZE)
         self.problem.addConstr(sum([self.a[i] for i in range(self.n)]) == k, "constraint_sum_a")
+
         self.problem.optimize()
        
         for index in tqdm(range(num_iter)):
             gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
 
-            if self.model == "linearrkhs":
-                term1 = 1/(k**2) * np.sum(np.outer(self.dataset, self.dataset.T))
-                term2 = 1/(k*self.m) * np.sum(np.outer(self.dataset, self.curation_set.T))
-                term3 = 1/(self.m**2) * np.sum(np.outer(self.curation_set, self.curation_set.T))
-                mpr = np.sqrt(term1+term2+term3)
-            else:
-                self.sup_function(gurobi_solution, k)
-                c = self.model.predict(self.expanded_dataset)
-                c /= np.linalg.norm(c)
-                c *= c.shape[0]
-                mpr = np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:]))
+            mpr, c = getMPR(gurobi_solution, self.dataset, k, self.curation_set, self.model)
+            # if self.model == "linearrkhs":
+            #     term1 = 1/(k**2) * np.sum(np.outer(self.dataset, self.dataset.T))
+            #     term2 = 1/(k*self.m) * np.sum(np.outer(self.dataset, self.curation_set.T))
+            #     term3 = 1/(self.m**2) * np.sum(np.outer(self.curation_set, self.curation_set.T))
+            #     mpr = np.sqrt(term1+term2+term3)
+            # else:
+            #     self.sup_function(gurobi_solution, k)
+            #     c = self.model.predict(self.expanded_dataset)
+            #     c /= np.linalg.norm(c)
+            #     c *= c.shape[0]
+            #     mpr = np.abs(np.sum((gurobi_solution/k)*c[:self.n])-np.sum((1/self.m)*c[self.n:]))
             
             if mpr < rho:
-            #if np.abs(np.sum((self.a.value/k)*c[retrieval_size:]-(1/self.m)*c[retrieval_size:])) < rho:
                 print("constraints satisfied, exiting early")
-                print("\t", np.abs(np.sum((gurobi_solution/k)*c[self.n:])-np.sum((1/self.m)*c[self.n:])))
+                #print("\t", np.abs(np.sum((gurobi_solution/k)*c[self.n:])-np.sum((1/self.m)*c[self.n:])))
+                print("\t", mpr)
                 print("\t", rho)
                 break
             
@@ -583,7 +597,7 @@ class MMR_MPR(): ##FIXME add curation capabilities
                     continue
                 # temporary select the jth element
                 indices[j] = 1
-                rep = getMPR(indices, self.dataset, k, curation_set = self.curation_set, model=self.model)
+                rep, _ = getMPR(indices, self.dataset, k, curation_set = self.curation_set, model=self.model)
                 MMR_temp[j] = (1-lambda_)* self.similarity_scores.T @ indices + lambda_ * rep
                 indices[j] = 0
             # select the element with the highest MMR 

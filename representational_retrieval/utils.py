@@ -56,7 +56,7 @@ def getMPR(indices, dataset, k, curation_set=None, model=None):
         c *= c.shape[0]
         mpr = np.abs(np.sum((indices/k)*c) - np.sum((1/m)*c))
     
-    return mpr
+    return mpr, c
 
 def MMR_cost(indices, embeddings):
     # compute the diversity score of the entire set
