@@ -106,13 +106,13 @@ def main():
         curation_dataset = None
 
     if args.functionclass == "randomforest":
-        reg_model = RandomForestRegressor(max_depth=2)
+        reg_model = RandomForestRegressor(max_depth=2, random_state=1017)
     elif args.functionclass == "linearregression":
         reg_model = LinearRegression(fit_intercept=False)
     elif args.functionclass == "decisiontree":
-        reg_model = DecisionTreeRegressor(max_depth=3)
+        reg_model = DecisionTreeRegressor(max_depth=3, random_state=1017)
     elif args.functionclass == "mlp":
-        reg_model = MLPRegressor([64, 64])
+        reg_model = MLPRegressor([64, 64], random_state=1017)
     elif args.functionclass == "linearrkhs":
         reg_model = "linearrkhs"
     else:
@@ -187,18 +187,20 @@ def main():
         selection = np.argsort(s.squeeze())[::-1][:args.k]
         top_indices[selection] = 1
         sim_upper_bound = s.T@top_indices
-        rep_upper_bounds = []
-        for _ in range(10):
-            rep_upper_bounds.append(getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model))
-        print(rep_upper_bounds)
-        rep_upper_bound = np.mean(rep_upper_bounds)
-        print("sim_upper_bound, rep_upper_bound: {}, {}".format(sim_upper_bound, rep_upper_bound))
+        # rep_upper_bounds = []
+        # for _ in range(10):
+        #     rep_upper_bounds.append(getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model))
+        # print(rep_upper_bounds)
+        # rep_upper_bound = np.mean(rep_upper_bounds)
+        # print("sim_upper_bound, rep_upper_bound: {}, {}".format(sim_upper_bound, rep_upper_bound))
+        rep_upper_bound = getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
+        print("mpr for KNN", rep_upper_bound)
 
+        random_indices = np.zeros(n)
         
         random_sims = []
         random_reps = []
         for _ in range(10):
-            random_indices = np.zeros(n)
             random_selection = np.random.choice(np.arange(n), args.k, replace=False)
             random_indices[random_selection] = 1
             random_sim2 = s.T@random_indices
@@ -207,10 +209,10 @@ def main():
                 random_reps_oracles.append(getMPR(random_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model))
             random_reps.append(np.mean(random_reps_oracles))
             random_sims.append(random_sim2)
-        print(random_reps)
+        #print(random_reps)
         random_rep = np.mean(random_reps)
         random_sim = np.mean(random_sims)
-        print("sim_random, rep_random: {}, {}".format(random_sim, random_rep))
+        #print("sim_random, rep_random: {}, {}".format(random_sim, random_rep))
 
 
         torch.cuda.empty_cache()
@@ -228,7 +230,9 @@ def main():
             indices_list = []
             rounded_indices_list = []
             # lb, ub = get_lower_upper_bounds(args.k, s, retrieval_labels, curation_labels)
-            rhos = np.linspace(random_rep, rep_upper_bound, 50)
+            #rhos = [rep_upper_bound]
+            rhos = np.linspace(0.005, rep_upper_bound, 50)
+            #rhos = np.linspace(random_rep, rep_upper_bound, 50)
             # rhos = np.linspace(0.005, 0.025, 20)
 
             # rhos = np.linspace(lb, ub, 40)[::-1]
@@ -236,9 +240,13 @@ def main():
                 indices = solver.fit(args.k, num_iter, rho)
                 if indices is None: ## returns none if problem is infeasible
                     continue
+                
                 indices_rounded = indices.copy()
                 indices_rounded[np.argsort(indices_rounded)[::-1][args.k:]] = 0
                 indices_rounded[indices_rounded>1e-5] = 1.0 
+                # print(np.where(indices_rounded==1)[0])
+                # print(np.where(top_indices==1)[0])
+                # assert (indices_rounded == top_indices).all(), f"Not starting from KNN indices"
 
                 rep = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 print("Rep: ", rep)
@@ -264,7 +272,8 @@ def main():
             results['rounded_sims'] = rounded_sims
             results['rounded_indices'] = rounded_indices_list
             results['rhos'] = rhos
-            solver.problem.dispose()
+            if solver.problem:
+                solver.problem.dispose()
             del solver
         elif args.method == "ip":
             if reg_model == "linear":
@@ -349,7 +358,7 @@ def main():
             del solver
 
         elif args.method == "mmr":
-            solver = MMR(s, retrieval_features, curation_embeddings=curation_features)
+            solver = MMR(s, retrieval_features)
             lambdas = np.linspace(0, 1-1e-5, 50)
 
             reps = []
@@ -504,7 +513,7 @@ def main():
                 results['indices'] = indices_list
                 results['lambdas'] = lambdas #control amt of intervention. eps = .5 means half the time you take a PBM step, half the time you take a greedy one
                 results['selection'] = selection_list
-        result_path = 'results/alex'
+        result_path = 'results/0510/'
         q_title = q.split(" ")[-1]
         print("MPR: ", results['MPR'])
         print("sims: ", results['sims'])
