@@ -22,13 +22,18 @@ def get_top_embeddings_labels_ids(dataset, query, embedding_model, datadir):
     if datadir == "occupations": ## Occupations is so small no need to use all 10k
         embeddings = []
         filepath = "/n/holylabs/LABS/calmon_lab/Lab/datasets/occupations/"
-        for i, path in enumerate(dataset.img_paths):
-            image_id = os.path.relpath(path.split(".")[0], filepath)
-            embeddingpath = os.path.join(filepath, embedding_model, image_id+".pt")
-            embeddings.append(torch.load(embeddingpath))
-        # embeddings = torch.nn.functional.normalize(torch.stack(embeddings), dim=1).cpu().numpy()
-        labels = dataset.labels.numpy()
-        indices = torch.arange(embeddings.shape[0])
+        embeddings = np.load(os.path.join(filepath, embedding_model, "architect/embeds.npy"))
+        indices = []
+        labels = np.zeros((embeddings.shape[0], dataset.labels.shape[1]))
+        with open(os.path.join(filepath, embedding_model, "architect/images.txt"), "r") as f:
+            lines = f.readlines()
+            for i, line in enumerate(lines):
+                line = line.strip()
+                idx = dataset.img_paths.index(line+".jpg")
+                labels[i] = dataset.labels[idx].numpy()
+                indices.append(idx)
+        # labels = dataset.labels.numpy()
+        # indices = torch.arange(embeddings.shape[0])
     else:
         retrievaldir = os.path.join("/n/holylabs/LABS/calmon_lab/Lab/datasets", datadir, embedding_model,query)
         embeddings = np.load(os.path.join(retrievaldir, "embeds.npy"))
@@ -63,14 +68,14 @@ def main():
 
     if args.method != "debiasclip":
         embedding_model = "clip"
-        # model, preprocess = clip.load("ViT-B/32", device=args.device)
-        _, preprocess = clip.load("ViT-B/32", device=args.device)
-        # model = model.to(args.device)
+        model, preprocess = clip.load("ViT-B/32", device=args.device)
+        # _, preprocess = clip.load("ViT-B/32", device=args.device)
+        model = model.to(args.device)
 
     else:
         embedding_model = "debiasclip"
-        _, preprocess = dclip.load("ViT-B/16-gender", device =args.device) # DebiasClip for gender, the only publicly available model
-        # model = model.to(args.device)
+        model, preprocess = dclip.load("ViT-B/16-gender", device =args.device) # DebiasClip for gender, the only publicly available model
+        model = model.to(args.device)
 
     # Load the dataset
     if args.dataset == "fairface":
@@ -122,8 +127,15 @@ def main():
         q = "A photo of "+ q_org
         q_tag = q.split(" ")[-1]
         print(q)
-        q_emb = np.load("representational_retrieval/queries/{}_{}.npy".format(embedding_model, q_tag))
-        # q_token = clip.tokenize(q).to(args.device)
+        # q_emb = np.load("representational_retrieval/queries/{}_{}.npy".format(embedding_model, q_tag))
+        q_token = clip.tokenize(q).to(args.device)
+
+        with torch.no_grad():
+            q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
+        q_emb = q_emb/np.linalg.norm(q_emb)
+
+        np.save("representational_retrieval/queries/{}_{}.npy".format(embedding_model, q_tag), q_emb)
+        continue
 
         retrieval_features, retrieval_labels, retrieval_indices = get_top_embeddings_labels_ids(
             dataset,
@@ -166,9 +178,7 @@ def main():
 
         print(retrieval_features.shape)
 
-        # with torch.no_grad():
-        #     q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
-        # q_emb = q_emb/np.linalg.norm(q_emb)
+        
 
         # compute similarities
         s = retrieval_features @ q_emb.T
@@ -207,10 +217,7 @@ def main():
 
         results = {}
         if args.method == "lp":
-            if reg_model == "linearrkhs":
-                solver = BoundedLinearLP(s, retrieval_labels, curation_set=curation_labels)
-            else:
-                solver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
+            solver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
 
             num_iter = 50
 
@@ -226,10 +233,7 @@ def main():
 
             # rhos = np.linspace(lb, ub, 40)[::-1]
             for rho in tqdm(rhos, desc="rhos"):
-                if args.functionclass == "linearrkhs":
-                    indices = solver.fit(args.k, rho)
-                else:
-                    indices = solver.fit(args.k, num_iter, rho)
+                indices = solver.fit(args.k, num_iter, rho)
                 if indices is None: ## returns none if problem is infeasible
                     continue
                 indices_rounded = indices.copy()
@@ -297,6 +301,51 @@ def main():
             results['indices'] = indices_list
             results['rhos'] = rhos
             solver.problem.dispose()
+            del solver
+        elif args.method == "closed_lp":
+            if args.functionclass != "linearregression":
+                print("linearregression required for closed lp")
+                exit()
+            solver = BoundedDataNormLP(s, retrieval_labels, curation_labels=curation_labels)
+
+            lb, ub = solver.get_lower_upper_bounds(args.k)
+
+            num_iter = 50
+
+            reps = []
+            sims = []
+            rounded_reps = []
+            rounded_sims = []
+            indices_list = []
+            rounded_indices_list = []
+            rhos = np.linspace(lb, ub, 50)
+            for rho in tqdm(rhos, desc="rhos"):
+                indices = solver.fit(args.k, rho)
+                indices_rounded = indices.copy()
+                indices_rounded[np.argsort(indices_rounded)[::-1][args.k:]] = 0
+                indices_rounded[indices_rounded>1e-5] = 1.0 
+
+                rep = solver.getClosedMPR(indices, args.k)
+                print("Rep: ", rep)
+                sim = (s.T @ indices)
+                print("Sim: ", sim)
+
+                reps.append(rep)
+                sims.append(sim[0])
+                indices_list.append(indices)
+
+                rounded_rep = solver.getClosedMPR(indices_rounded, args.k)
+                print("Rounded Rep", rounded_rep)
+                rounded_sim = (s.T @ indices_rounded)
+
+                rounded_reps.append(rounded_rep)
+                rounded_sims.append(rounded_sim[0])
+                rounded_indices_list.append(indices_rounded)
+
+            results['MPR'] = reps
+            results['sims'] = sims
+            results['indices'] = indices_list
+            results['rhos'] = rhos
             del solver
 
         elif args.method == "mmr":

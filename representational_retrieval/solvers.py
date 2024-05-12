@@ -9,23 +9,114 @@ from tqdm.auto import tqdm
 
 
 
-class BoundedLinearModels():
-    def __init__(self, similarity_scores, labels):
+# class BoundedLinearModels():
+#     def __init__(self, similarity_scores, labels):
+#         m = similarity_scores.shape[0]
+#         d = labels.shape[1]
+#         self.similarity_scores = similarity_scores
+#         self.a = cp.Variable(m)
+#         self.y = cp.Variable(d)
+#         self.rho = cp.Parameter(nonneg=True) #similarity value
+#         self.C = labels
+#         self.cbar = self.C.mean(axis=0)
+#         self.objective = None
+#         self.constraints = None
+#         self.problem = None
+    
+#     def get_lower_upper_bounds(self, k):
+#         objective = cp.Maximize(self.similarity_scores.T @ self.a)
+#         constraints = [(self.C.T @ self.a)/k == self.cbar, sum(self.a)==k, 0<=self.a, self.a<=1]
+#         prob = cp.Problem(objective, constraints)
+#         prob.solve(solver=cp.ECOS)
+#         lb_opt = objective.value
+
+
+#         #  find global optimal
+#         objective = cp.Maximize(self.similarity_scores.T @ self.a)
+#         constraints = [(self.C.T @ self.a)/k == self.y, sum(self.a)==k, 0<=self.a, self.a<=1]
+#         prob = cp.Problem(objective, constraints)
+#         prob.solve(solver=cp.ECOS)
+#         global_opt = objective.value
+
+#         return lb_opt, global_opt
+    
+#     def fit(self, k, p):
+#         self.rho.value = p
+        
+#         if self.objective is None:
+#             self.objective = cp.Minimize(cp.sum_squares(self.y-self.cbar))
+#         if self.constraints is None:
+#             self.constraints = [(self.C.T @ self.a)/k == self.y, sum(self.a)==k, 0<=self.a, self.a<=1,  self.similarity_scores.T @ self.a==self.rho]
+#         if self.problem is None:
+#             self.problem = cp.Problem(self.objective, self.constraints)
+
+#         self.problem.solve(solver=cp.ECOS,warm_start=True)
+
+#         at = self.a.value
+
+#         return at
+
+#         similarity = self.similarity_scores.T@at
+#         representation = np.sqrt(np.sum(np.power((self.C.T @ at)/k - self.cbar, 2)))
+
+#         return representation, similarity
+
+#     def fit_select(self, k, p):
+#         self.rho.value = p
+
+#         if self.objective is None:
+#             self.objective = cp.Minimize(cp.sum_squares(self.y-self.cbar))
+#         if self.constraints is None:
+#             self.constraints = [(self.C.T @ self.a)/k == self.y, sum(self.a)==k, 0<=self.a, self.a<=1,  self.similarity_scores.T @ self.a==self.rho]
+#         if self.problem is None:
+#             self.problem = cp.Problem(self.objective, self.constraints)
+
+#         self.problem.solve(solver=cp.ECOS,warm_start=True)
+
+#         sparsity = sum(self.a.value>1e-4)
+#         at = self.a.value
+#         at[np.argsort(at)[::-1][k:]] = 0
+#         at[at>1e-5] = 1.0 
+#         # representation = np.sqrt(np.sum(np.power((self.C.T @ at)/k - self.cbar, 2)))
+#         # similarity = self.similarity_scores.T @ at
+
+#         return at, sparsity
+
+#         return representation, similarity, sparsity
+    
+#     def get_representation(self, indices, k):
+#         rep = np.sqrt(np.sum(np.power((self.C.T @ indices)/k - self.cbar, 2)))
+#         return rep
+    
+#     def get_similarity(self, indices):
+#         sim = self.similarity_scores.T @ indices
+#         return sim
+    
+class BoundedDataNormLP():
+    def __init__(self, similarity_scores, retrieval_labels, curation_labels=None):
         m = similarity_scores.shape[0]
-        d = labels.shape[1]
+        d = retrieval_labels.shape[1]
         self.similarity_scores = similarity_scores
         self.a = cp.Variable(m)
         self.y = cp.Variable(d)
         self.rho = cp.Parameter(nonneg=True) #similarity value
-        self.C = labels
-        self.cbar = self.C.mean(axis=0)
+        self.retrieval_labels = retrieval_labels
+        if curation_labels is not None:
+            self.curation_labels = curation_labels
+        else:
+            self.curation_labels = retrieval_labels
+        self.curation_mean = self.curation_labels.mean(axis=0)
         self.objective = None
         self.constraints = None
         self.problem = None
+        U,S,V = np.linalg.svd(self.retrieval_labels,full_matrices=False)
+        self.sigmainv=np.linalg.inv(S)
+        self.V = V
+
     
     def get_lower_upper_bounds(self, k):
         objective = cp.Maximize(self.similarity_scores.T @ self.a)
-        constraints = [(self.C.T @ self.a)/k == self.cbar, sum(self.a)==k, 0<=self.a, self.a<=1]
+        constraints = [(self.retrieval_labels.T @ self.a)/k == self.curation_mean, sum(self.a)==k, 0<=self.a, self.a<=1]
         prob = cp.Problem(objective, constraints)
         prob.solve(solver=cp.ECOS)
         lb_opt = objective.value
@@ -33,7 +124,7 @@ class BoundedLinearModels():
 
         #  find global optimal
         objective = cp.Maximize(self.similarity_scores.T @ self.a)
-        constraints = [(self.C.T @ self.a)/k == self.y, sum(self.a)==k, 0<=self.a, self.a<=1]
+        constraints = [(self.retrieval_labels.T @ self.a)/k == self.y, sum(self.a)==k, 0<=self.a, self.a<=1]
         prob = cp.Problem(objective, constraints)
         prob.solve(solver=cp.ECOS)
         global_opt = objective.value
@@ -44,9 +135,10 @@ class BoundedLinearModels():
         self.rho.value = p
         
         if self.objective is None:
-            self.objective = cp.Minimize(cp.sum_squares(self.y-self.cbar))
+            self.objective = cp.Minimize(cp.sum_squares((self.y-self.curation_mean)@self.V@self.sigmainv))
+            # self.objective = cp.Maximize()
         if self.constraints is None:
-            self.constraints = [(self.C.T @ self.a)/k == self.y, sum(self.a)==k, 0<=self.a, self.a<=1,  self.similarity_scores.T @ self.a==self.rho]
+            self.constraints = [(self.retrieval_labels.T @ self.a)/k == self.y, sum(self.a)==k, 0<=self.a, self.a<=1,  self.similarity_scores.T @ self.a==self.rho]
         if self.problem is None:
             self.problem = cp.Problem(self.objective, self.constraints)
 
@@ -55,42 +147,9 @@ class BoundedLinearModels():
         at = self.a.value
 
         return at
-
-        similarity = self.similarity_scores.T@at
-        representation = np.sqrt(np.sum(np.power((self.C.T @ at)/k - self.cbar, 2)))
-
-        return representation, similarity
-
-    def fit_select(self, k, p):
-        self.rho.value = p
-
-        if self.objective is None:
-            self.objective = cp.Minimize(cp.sum_squares(self.y-self.cbar))
-        if self.constraints is None:
-            self.constraints = [(self.C.T @ self.a)/k == self.y, sum(self.a)==k, 0<=self.a, self.a<=1,  self.similarity_scores.T @ self.a==self.rho]
-        if self.problem is None:
-            self.problem = cp.Problem(self.objective, self.constraints)
-
-        self.problem.solve(solver=cp.ECOS,warm_start=True)
-
-        sparsity = sum(self.a.value>1e-4)
-        at = self.a.value
-        at[np.argsort(at)[::-1][k:]] = 0
-        at[at>1e-5] = 1.0 
-        # representation = np.sqrt(np.sum(np.power((self.C.T @ at)/k - self.cbar, 2)))
-        # similarity = self.similarity_scores.T @ at
-
-        return at, sparsity
-
-        return representation, similarity, sparsity
     
-    def get_representation(self, indices, k):
-        rep = np.sqrt(np.sum(np.power((self.C.T @ indices)/k - self.cbar, 2)))
-        return rep
-    
-    def get_similarity(self, indices):
-        sim = self.similarity_scores.T @ indices
-        return sim
+    def getClosedMPR(self, indices, k):
+        return np.linalg.norm(((self.retrieval_labels.T @ indices)/k - self.curation_mean)@self.V@self.sigmainv)
     
 # MMR algorithm defined in PATHS using CLIP embedding
 class MMR():
@@ -407,54 +466,6 @@ class GurobiLP():
     def get_similarity(self, indices):
         sim = indices.T@self.similarity_scores
         return sim
-    
-class BoundedLinearLP():
-    def __init__(self, similarity_scores, dataset, curation_set=None):
-        print("using Bounded Linear LP...")
-        self.n = dataset.shape[0]
-        self.d = dataset.shape[1]
-        self.dataset = dataset
-
-        if curation_set is None: ## If no curation set is provided, compute MPR over the retrieval set
-            self.curation_set = self.dataset
-        else:
-            self.curation_set = curation_set
-        self.m = self.curation_set.shape[0]
-
-        self.expanded_dataset = np.concatenate((self.dataset, self.curation_set), axis=0)
-
-        self.similarity_scores = similarity_scores.squeeze()
-
-    def fit(self, k, rho):
-        self.problem = gp.Model("linear_rkhs_lp")
-        self.a = self.problem.addVars(self.n, lb=0, ub=1, vtype=GRB.CONTINUOUS, name="a")
-        obj = gp.quicksum(self.similarity_scores[i]*self.a[i] for i in range(self.m))
-        self.problem.setObjective(obj, sense=GRB.MAXIMIZE)
-        # self.problem.addConstr(obj >= rho, "constraint_sim")
-        self.problem.addConstr(sum([self.a[i] for i in range(self.n)]) == k, "constraint_sum_a")
-
-        filtered_dataset = [self.dataset[i, :]*self.a[i] for i in range(self.n)]
-
-        term1 = 1/(k**2)*sum([filtered_dataset[i]@filtered_dataset[j] for i in range(self.n) for j in range(self.n)])
-        term2 = 2/(k*self.m)*sum([filtered_dataset[i]@self.curation_set[j, :] for i in range(self.n) for j in range(self.m)])
-        term3 = 1/(self.m**2)*sum([self.curation_set[i, :]@self.curation_set[j, :] for i in range(self.m) for j in range(self.m)])
-        obj2 = term1-term2+term3
-
-        self.problem.addQConstr(term1-term2+term3 <= rho**2, "qconstraint")
-        # self.problem.setObjective(obj2, sense=GRB.MINIMIZE)
-
-        self.problem.optimize()
-        self.problem.update()
-
-        if self.problem.status == 3:
-                print("Constraints infeasible, rho = {}".format(rho))
-                print(self.problem.NumConstrs)
-                return None
-
-        gurobi_solution = np.array([self.a[i].x for i in range(len(self.a))])
-
-        return gurobi_solution
-
        
 class ClipClip():
     # As defined in the paper "Are Gender-Neutral Queries Really Gender-Neutral? Mitigating Gender Bias in Image Search" (Wang et. al. 2021)
