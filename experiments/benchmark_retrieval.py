@@ -22,18 +22,13 @@ def get_top_embeddings_labels_ids(dataset, query, embedding_model, datadir):
     if datadir == "occupations": ## Occupations is so small no need to use all 10k
         embeddings = []
         filepath = "/n/holylabs/LABS/calmon_lab/Lab/datasets/occupations/"
-        embeddings = np.load(os.path.join(filepath, embedding_model, "architect/embeds.npy"))
-        indices = []
-        labels = np.zeros((embeddings.shape[0], dataset.labels.shape[1]))
-        with open(os.path.join(filepath, embedding_model, "architect/images.txt"), "r") as f:
-            lines = f.readlines()
-            for i, line in enumerate(lines):
-                line = line.strip()
-                idx = dataset.img_paths.index(line+".jpg")
-                labels[i] = dataset.labels[idx].numpy()
-                indices.append(idx)
-        # labels = dataset.labels.numpy()
-        # indices = torch.arange(embeddings.shape[0])
+        for i, path in enumerate(dataset.img_paths):
+            image_id = os.path.relpath(path.split(".")[0], filepath)
+            embeddingpath = os.path.join(filepath, embedding_model, image_id+".pt")
+            embeddings.append(torch.load(embeddingpath))
+        # embeddings = torch.nn.functional.normalize(torch.stack(embeddings), dim=1).cpu().numpy()
+        labels = dataset.labels.numpy()
+        indices = torch.arange(embeddings.shape[0])
     else:
         retrievaldir = os.path.join("/n/holylabs/LABS/calmon_lab/Lab/datasets", datadir, embedding_model,query)
         embeddings = np.load(os.path.join(retrievaldir, "embeds.npy"))
@@ -68,14 +63,14 @@ def main():
 
     if args.method != "debiasclip":
         embedding_model = "clip"
+        # model, preprocess = clip.load("ViT-B/32", device=args.device)
         model, preprocess = clip.load("ViT-B/32", device=args.device)
-        # _, preprocess = clip.load("ViT-B/32", device=args.device)
-        model = model.to(args.device)
+        # model = model.to(args.device)
 
     else:
         embedding_model = "debiasclip"
         model, preprocess = dclip.load("ViT-B/16-gender", device =args.device) # DebiasClip for gender, the only publicly available model
-        model = model.to(args.device)
+        # model = model.to(args.device)
 
     # Load the dataset
     if args.dataset == "fairface":
@@ -128,11 +123,7 @@ def main():
         q_tag = q.split(" ")[-1]
         print(q)
         q_emb = np.load("representational_retrieval/queries/{}_{}.npy".format(embedding_model, q_tag))
-        q_token = clip.tokenize(q).to(args.device)
-
-        # with torch.no_grad():
-        #     q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
-        # q_emb = q_emb/np.linalg.norm(q_emb)
+        # q_token = clip.tokenize(q).to(args.device)
 
         retrieval_features, retrieval_labels, retrieval_indices = get_top_embeddings_labels_ids(
             dataset,
@@ -175,7 +166,9 @@ def main():
 
         print(retrieval_features.shape)
 
-        
+        # with torch.no_grad():
+        #     q_emb = model.encode_text(q_token).cpu().numpy().astype(np.float64)
+        # q_emb = q_emb/np.linalg.norm(q_emb)
 
         # compute similarities
         s = retrieval_features @ q_emb.T
@@ -190,8 +183,11 @@ def main():
         # print(rep_upper_bounds)
         # rep_upper_bound = np.mean(rep_upper_bounds)
         # print("sim_upper_bound, rep_upper_bound: {}, {}".format(sim_upper_bound, rep_upper_bound))
-        rep_upper_bound = getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
-        print("mpr for KNN", rep_upper_bound)
+        rep_upper_bound, _ = getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
+        rep_upper_bound_1, _ = getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
+        print(rep_upper_bound == rep_upper_bound_1, "MPR consistent across two calls") 
+        print("KNN selection", selection)
+        print("mpr for KNN", rep_upper_bound_1)
 
         random_indices = np.zeros(n)
         
@@ -203,7 +199,8 @@ def main():
             random_sim2 = s.T@random_indices
             random_reps_oracles = []
             for _ in range(10):
-                random_reps_oracles.append(getMPR(random_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model))
+                random_MPR, _ = getMPR(random_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
+                random_reps_oracles.append(random_MPR)
             random_reps.append(np.mean(random_reps_oracles))
             random_sims.append(random_sim2)
         #print(random_reps)
@@ -215,9 +212,12 @@ def main():
         torch.cuda.empty_cache()
 
         results = {}
-        if args.method == "lp":
-            solver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
 
+        if args.method == "lp":
+            if reg_model == "linearrkhs":
+                solver = BoundedLinearLP(s, retrieval_labels, curation_set=curation_labels)
+            else:
+                solver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
             num_iter = 50
 
             reps = []
@@ -228,13 +228,16 @@ def main():
             rounded_indices_list = []
             # lb, ub = get_lower_upper_bounds(args.k, s, retrieval_labels, curation_labels)
             #rhos = [rep_upper_bound]
-            rhos = np.linspace(0.005, rep_upper_bound, 50)
+            rhos = np.linspace(0.005, rep_upper_bound+1e-5, 50)
             #rhos = np.linspace(random_rep, rep_upper_bound, 50)
             # rhos = np.linspace(0.005, 0.025, 20)
 
             # rhos = np.linspace(lb, ub, 40)[::-1]
             for rho in tqdm(rhos, desc="rhos"):
-                indices = solver.fit(args.k, num_iter, rho, top_indices)
+                if args.functionclass == "linearrkhs":
+                    indices = solver.fit(args.k, rho, KNN_indices = top_indices)
+                else:
+                    indices = solver.fit(args.k, num_iter, rho, KNN_indices = top_indices)
                 if indices is None: ## returns none if problem is infeasible
                     continue
                 
@@ -245,7 +248,7 @@ def main():
                 # print(np.where(top_indices==1)[0])
                 # assert (indices_rounded == top_indices).all(), f"Not starting from KNN indices"
 
-                rep = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 print("Rep: ", rep)
                 sim = (s.T @ indices)
                 print("Sim: ", sim)
@@ -254,7 +257,7 @@ def main():
                 sims.append(sim[0])
                 indices_list.append(indices)
 
-                rounded_rep = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                rounded_rep, _ = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 print("Rounded Rep", rounded_rep)
                 rounded_sim = (s.T @ indices_rounded)
 
@@ -295,7 +298,7 @@ def main():
                     continue
                 sparsity = sum(indices>1e-4)
                 
-                rep = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 sim = (s.T @ indices)
 
                 reps.append(rep)
@@ -353,9 +356,8 @@ def main():
             results['indices'] = indices_list
             results['rhos'] = rhos
             del solver
-
         elif args.method == "mmr":
-            solver = MMR(s, retrieval_features)
+            solver = MMR(s, retrieval_features, curation_embeddings=curation_features)
             lambdas = np.linspace(0, 1-1e-5, 50)
 
             reps = []
@@ -367,7 +369,7 @@ def main():
             for p in tqdm(lambdas):
                 indices, diversity_cost, selection = solver.fit(args.k, p) 
                 # print(indices, flush=True)
-                rep = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
                 sims.append(sim)
@@ -398,18 +400,18 @@ def main():
             selection_list = []
             for p in tqdm(lambdas):
                 indices, selection = solver.fit(args.k, p) 
-                rep = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
                 sims.append(sim)
                 indices_list.append(indices)
                 selection_list.append(selection)
 
-                results['MPR'] = reps
-                results['sims'] = sims
-                results['indices'] = indices_list
-                results['lambdas'] = lambdas
-                results['selection'] = selection_list
+            results['MPR'] = reps
+            results['sims'] = sims
+            results['indices'] = indices_list
+            results['lambdas'] = lambdas
+            results['selection'] = selection_list
 
 
         elif args.method == "debiasclip":
@@ -420,7 +422,7 @@ def main():
             top_indices[selection] = 1
             sims = s.T@top_indices
 
-            reps = getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
+            reps, _ = getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
             AssertionError(np.sum(top_indices)==args.k)
             results['sims'] = sims
             results['selection'] = selection
@@ -462,18 +464,18 @@ def main():
             for num_col in tqdm(cols_drop):
                 print(num_col)
                 indices, selection = solver.fit(args.k, num_col,q_emb) 
-                rep = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
                 sims.append(sim)
                 indices_list.append(indices)
                 selection_list.append(selection)
 
-                results['MPR'] = reps
-                results['sims'] = sims
-                results['indices'] = indices_list
-                results['lambdas'] = cols_drop # number of columns dropped
-                results['selection'] = selection_list
+            results['MPR'] = reps
+            results['sims'] = sims
+            results['indices'] = indices_list
+            results['lambdas'] = cols_drop # number of columns dropped
+            results['selection'] = selection_list
 
         elif args.method == "pbm":
             pbm_classes = [0, 1, 2] # correspond to predicted sensitive attribute being [Neutral/Uncertain, Male, Female]. 
@@ -498,18 +500,18 @@ def main():
             # drop a range of columns
             for eps in tqdm(lambdas):
                 indices, selection = solver.fit(args.k, eps) 
-                rep = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
                 sims.append(sim)
                 indices_list.append(indices)
                 selection_list.append(selection)
 
-                results['MPR'] = reps
-                results['sims'] = sims
-                results['indices'] = indices_list
-                results['lambdas'] = lambdas #control amt of intervention. eps = .5 means half the time you take a PBM step, half the time you take a greedy one
-                results['selection'] = selection_list
+            results['MPR'] = reps
+            results['sims'] = sims
+            results['indices'] = indices_list
+            results['lambdas'] = lambdas #control amt of intervention. eps = .5 means half the time you take a PBM step, half the time you take a greedy one
+            results['selection'] = selection_list
         result_path = 'results/0510/'
         q_title = q.split(" ")[-1]
         print("MPR: ", results['MPR'])
