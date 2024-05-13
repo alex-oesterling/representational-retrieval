@@ -42,9 +42,10 @@ def getMPR(indices, dataset, k, curation_set=None, model=None):
 
     reg = oracle_function(indices, dataset, curation_set=curation_set, model=model)
 
-    if curation_set is not None:
+    if curation_set is None:
         curation_set = dataset
     expanded_dataset = np.concatenate((dataset, curation_set), axis=0)
+    print(expanded_dataset.shape)
     m = curation_set.shape[0]
     c = reg.predict(expanded_dataset)
     c /= np.linalg.norm(c)

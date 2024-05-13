@@ -184,7 +184,7 @@ def main():
         sim_upper_bound = s.T@top_indices
         # rep_upper_bounds = []
         # for _ in range(10):
-        #     rep_upper_bounds.append(getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model))
+        #     rep_upper_bounds.append(getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)[0])
         # print(rep_upper_bounds)
         # rep_upper_bound = np.mean(rep_upper_bounds)
         # print("sim_upper_bound, rep_upper_bound: {}, {}".format(sim_upper_bound, rep_upper_bound))
@@ -254,6 +254,7 @@ def main():
                 # assert (indices_rounded == top_indices).all(), f"Not starting from KNN indices"
 
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 print("Rep: ", rep)
                 sim = (s.T @ indices)
                 print("Sim: ", sim)
@@ -262,6 +263,7 @@ def main():
                 sims.append(sim[0])
                 indices_list.append(indices)
 
+                rounded_rep, _ = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 rounded_rep, _ = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 print("Rounded Rep", rounded_rep)
                 rounded_sim = (s.T @ indices_rounded)
@@ -303,6 +305,7 @@ def main():
                     continue
                 sparsity = sum(indices>1e-4)
                 
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 sim = (s.T @ indices)
 
@@ -375,6 +378,7 @@ def main():
                 indices, diversity_cost, selection = solver.fit(args.k, p) 
                 # print(indices, flush=True)
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
                 sims.append(sim)
@@ -406,6 +410,7 @@ def main():
             for p in tqdm(lambdas):
                 indices, selection = solver.fit(args.k, p) 
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
                 sims.append(sim)
@@ -427,6 +432,7 @@ def main():
             top_indices[selection] = 1
             sims = s.T@top_indices
 
+            reps, _ = getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
             reps, _ = getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
             AssertionError(np.sum(top_indices)==args.k)
             results['sims'] = sims
@@ -470,6 +476,7 @@ def main():
                 print(num_col)
                 indices, selection = solver.fit(args.k, num_col,q_emb) 
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
                 sims.append(sim)
@@ -505,6 +512,7 @@ def main():
             # drop a range of columns
             for eps in tqdm(lambdas):
                 indices, selection = solver.fit(args.k, eps) 
+                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
