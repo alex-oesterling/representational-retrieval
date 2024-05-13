@@ -101,16 +101,21 @@ class BoundedDataNormLP():
         self.y = cp.Variable(d)
         self.rho = cp.Parameter(nonneg=True) #similarity value
         self.retrieval_labels = retrieval_labels
-        if curation_labels is not None:
-            self.curation_labels = curation_labels
-        else:
+
+        if curation_labels is None:
+            self.expanded_dataset = retrieval_labels
             self.curation_labels = retrieval_labels
+        else:
+            self.expanded_dataset = np.vstack((self.retrieval_labels, curation_labels))
+            self.curation_labels = curation_labels
+
         self.curation_mean = self.curation_labels.mean(axis=0)
         self.objective = None
         self.constraints = None
         self.problem = None
-        U,S,V = np.linalg.svd(self.retrieval_labels,full_matrices=False)
-        self.sigmainv=np.linalg.inv(S)
+        U,S_diag,V = np.linalg.svd(self.expanded_dataset,full_matrices=True)
+        S = np.vstack((np.diag(S_diag), np.zeros((self.expanded_dataset.shape[0]-self.expanded_dataset.shape[1], self.expanded_dataset.shape[1]))))
+        self.sigmainv=np.linalg.pinv(S)
         self.V = V
 
     
@@ -136,7 +141,6 @@ class BoundedDataNormLP():
         
         if self.objective is None:
             self.objective = cp.Minimize(cp.sum_squares((self.y-self.curation_mean)@self.V@self.sigmainv))
-            # self.objective = cp.Maximize()
         if self.constraints is None:
             self.constraints = [(self.retrieval_labels.T @ self.a)/k == self.y, sum(self.a)==k, 0<=self.a, self.a<=1,  self.similarity_scores.T @ self.a==self.rho]
         if self.problem is None:
@@ -149,7 +153,7 @@ class BoundedDataNormLP():
         return at
     
     def getClosedMPR(self, indices, k):
-        return np.linalg.norm(((self.retrieval_labels.T @ indices)/k - self.curation_mean)@self.V@self.sigmainv)
+        return np.sqrt(self.expanded_dataset.shape[0])*np.linalg.norm(((self.retrieval_labels.T @ indices)/k - self.curation_mean)@self.V@self.sigmainv)
     
 # MMR algorithm defined in PATHS using CLIP embedding
 class MMR():

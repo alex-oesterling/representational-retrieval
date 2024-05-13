@@ -23,40 +23,20 @@ def oracle_function(indices, dataset, curation_set=None, model=None):
     return reg
 
 def getMPR(indices, dataset, k, curation_set=None, model=None):
-    # if model is not None:
-    #     if model == "linearrkhs":
-    #         if curation_set is not None:
-    #             m = curation_set.shape[0]
-    #             print((dataset*indices).shape, flush=True)
-    #             term1 = 1/(k**2) * np.sum((dataset*indices)@(dataset*indices).T)
-    #             term2 = 2/(k*m) * np.sum((dataset*indices)@curation_set.T)
-    #             term3 = 1/(m**2) * np.sum(curation_set@curation_set.T)
-    #             mpr = np.sqrt(term1-term2+term3)
-    #         else:
-    #             m = dataset.shape[0]
-    #             term1 = 1/(k**2) * np.sum((dataset*indices)@(dataset*indices).T)
-    #             term2 = 2/(k*m) * np.sum((dataset*indices)@dataset.T)
-    #             term3 = 1/(m**2) * np.sum(dataset@dataset.T)
-    #             mpr = np.sqrt(term1-term2+term3)
-    #         return mpr
-
     reg = oracle_function(indices, dataset, curation_set=curation_set, model=model)
-
-    if curation_set is None:
-        curation_set = dataset
-    expanded_dataset = np.concatenate((dataset, curation_set), axis=0)
-    print(expanded_dataset.shape)
-    m = curation_set.shape[0]
-    c = reg.predict(expanded_dataset)
-    c /= np.linalg.norm(c)
-    c *= c.shape[0]
-    mpr = np.abs(np.sum((indices/k)*c[:dataset.shape[0]]) - np.sum((1/m)*c[dataset.shape[0]:]))
-    # else:
-    #     m = dataset.shape[0]
-    #     c = reg.predict(dataset)
-    #     c /= np.linalg.norm(c)
-    #     c *= c.shape[0]
-    #     mpr = np.abs(np.sum((indices/k)*c) - np.sum((1/m)*c))
+    if curation_set is not None:
+        expanded_dataset = np.concatenate((dataset, curation_set), axis=0)
+        m = curation_set.shape[0]
+        c = reg.predict(expanded_dataset)
+        c /= np.linalg.norm(c)
+        c *= np.sqrt(c.shape[0]) ## sqrt(n+m) = 141
+        mpr = np.abs(np.sum((indices/k)*c[:dataset.shape[0]]) - np.sum((1/m)*c[dataset.shape[0]:]))
+    else:
+        m = dataset.shape[0]
+        c = reg.predict(dataset)
+        c /= np.linalg.norm(c)
+        c *= np.sqrt(c.shape[0]) ## sqrt(n) = 100
+        mpr = np.abs(np.sum((indices/k)*c) - np.sum((1/m)*c))
     
     return mpr, c
 
