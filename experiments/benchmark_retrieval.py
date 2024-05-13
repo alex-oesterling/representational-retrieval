@@ -22,13 +22,18 @@ def get_top_embeddings_labels_ids(dataset, query, embedding_model, datadir):
     if datadir == "occupations": ## Occupations is so small no need to use all 10k
         embeddings = []
         filepath = "/n/holylabs/LABS/calmon_lab/Lab/datasets/occupations/"
-        for i, path in enumerate(dataset.img_paths):
-            image_id = os.path.relpath(path.split(".")[0], filepath)
-            embeddingpath = os.path.join(filepath, embedding_model, image_id+".pt")
-            embeddings.append(torch.load(embeddingpath))
-        # embeddings = torch.nn.functional.normalize(torch.stack(embeddings), dim=1).cpu().numpy()
-        labels = dataset.labels.numpy()
-        indices = torch.arange(embeddings.shape[0])
+        embeddings = np.load(os.path.join(filepath, embedding_model, "architect/embeds.npy"))
+        indices = []
+        labels = np.zeros((embeddings.shape[0], dataset.labels.shape[1]))
+        with open(os.path.join(filepath, embedding_model, "architect/images.txt"), "r") as f:
+            lines = f.readlines()
+            for i, line in enumerate(lines):
+                line = line.strip()
+                idx = dataset.img_paths.index(line+".jpg")
+                labels[i] = dataset.labels[idx].numpy()
+                indices.append(idx)
+        # labels = dataset.labels.numpy()
+        # indices = torch.arange(embeddings.shape[0])
     else:
         retrievaldir = os.path.join("/n/holylabs/LABS/calmon_lab/Lab/datasets", datadir, embedding_model,query)
         embeddings = np.load(os.path.join(retrievaldir, "embeds.npy"))
