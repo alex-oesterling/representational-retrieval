@@ -123,8 +123,8 @@ def main():
     for query in tqdm(queries):
         q_org = query.strip()
         q = "A photo of "+ q_org
-        q_tag = q.split(" ")[-1]
-        print(q)
+        q_tag = " ".join(q.split(" ")[4:])
+        print(q_tag)
         q_emb = np.load("representational_retrieval/queries/{}_{}.npy".format(embedding_model, q_tag))
         # q_token = clip.tokenize(q).to(args.device)
 
