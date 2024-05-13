@@ -113,8 +113,6 @@ def main():
         reg_model = DecisionTreeRegressor(max_depth=3, random_state=1017)
     elif args.functionclass == "mlp":
         reg_model = MLPRegressor([64, 64], random_state=1017)
-    elif args.functionclass == "linearrkhs":
-        reg_model = "linearrkhs"
     else:
         print("Function class not supported.")
         exit()
@@ -219,10 +217,11 @@ def main():
         results = {}
 
         if args.method == "lp":
-            if reg_model == "linearrkhs":
-                solver = BoundedLinearLP(s, retrieval_labels, curation_set=curation_labels)
-            else:
-                solver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
+            solver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
+            if args.functionclass == "linearregression":
+                closed_form_solver = BoundedDataNormLP(s, retrieval_labels, curation_labels=curation_labels)
+                gt_reps = []
+                gt_rounded_reps = []
             num_iter = 50
 
             reps = []
@@ -239,10 +238,7 @@ def main():
 
             # rhos = np.linspace(lb, ub, 40)[::-1]
             for rho in tqdm(rhos, desc="rhos"):
-                if args.functionclass == "linearrkhs":
-                    indices = solver.fit(args.k, rho, KNN_indices = top_indices)
-                else:
-                    indices = solver.fit(args.k, num_iter, rho, KNN_indices = top_indices)
+                indices = solver.fit(args.k, num_iter, rho, KNN_indices = top_indices)
                 if indices is None: ## returns none if problem is infeasible
                     continue
                 
@@ -254,18 +250,23 @@ def main():
                 # assert (indices_rounded == top_indices).all(), f"Not starting from KNN indices"
 
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
-                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 print("Rep: ", rep)
                 sim = (s.T @ indices)
                 print("Sim: ", sim)
+                if args.functionclass == "linearregression":
+                    gt_rep = closed_form_solver.getClosedMPR(indices, args.k)
+                    gt_reps.append(gt_rep)
 
                 reps.append(rep)
                 sims.append(sim[0])
                 indices_list.append(indices)
 
                 rounded_rep, _ = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
-                rounded_rep, _ = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 print("Rounded Rep", rounded_rep)
+                if args.functionclass == "linearregression":
+                    gt_rounded_rep = closed_form_solver.getClosedMPR(indices_rounded, args.k)
+                    gt_rounded_reps.append(gt_rounded_rep)
+
                 rounded_sim = (s.T @ indices_rounded)
 
                 rounded_reps.append(rounded_rep)
@@ -279,15 +280,14 @@ def main():
             results['rounded_sims'] = rounded_sims
             results['rounded_indices'] = rounded_indices_list
             results['rhos'] = rhos
+            if args.functionclass == "linearregression":
+                results['gt_MPR'] = gt_reps
+                results['gt_rounded_MPR'] = gt_rounded_reps
             if solver.problem:
                 solver.problem.dispose()
             del solver
         elif args.method == "ip":
-            if reg_model == "linear":
-                print("Need to implement linear q program for IP.")
-                exit()
-            else:
-                solver = GurobiIP(s, retrieval_labels, curation_set=curation_labels, model = reg_model)
+            solver = GurobiIP(s, retrieval_labels, curation_set=curation_labels, model = reg_model)
 
             num_iter = 50
 
@@ -305,7 +305,6 @@ def main():
                     continue
                 sparsity = sum(indices>1e-4)
                 
-                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 sim = (s.T @ indices)
 
@@ -362,6 +361,9 @@ def main():
             results['MPR'] = reps
             results['sims'] = sims
             results['indices'] = indices_list
+            results['rounded_MPR'] = rounded_reps
+            results['rounded_sims'] = rounded_sims
+            results['rounded_indices'] = rounded_indices_list
             results['rhos'] = rhos
             del solver
         elif args.method == "mmr":
@@ -377,7 +379,6 @@ def main():
             for p in tqdm(lambdas):
                 indices, diversity_cost, selection = solver.fit(args.k, p) 
                 # print(indices, flush=True)
-                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
@@ -410,7 +411,6 @@ def main():
             for p in tqdm(lambdas):
                 indices, selection = solver.fit(args.k, p) 
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
-                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
                 sims.append(sim)
@@ -432,7 +432,6 @@ def main():
             top_indices[selection] = 1
             sims = s.T@top_indices
 
-            reps, _ = getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
             reps, _ = getMPR(top_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
             AssertionError(np.sum(top_indices)==args.k)
             results['sims'] = sims
@@ -476,7 +475,6 @@ def main():
                 print(num_col)
                 indices, selection = solver.fit(args.k, num_col,q_emb) 
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
-                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
                 sims.append(sim)
@@ -512,7 +510,6 @@ def main():
             # drop a range of columns
             for eps in tqdm(lambdas):
                 indices, selection = solver.fit(args.k, eps) 
-                rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
                 rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
                 sim = (s.T @ indices)
                 reps.append(rep)
