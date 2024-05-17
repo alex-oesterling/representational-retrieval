@@ -23,6 +23,7 @@ def get_top_embeddings_labels_ids(dataset, query, embedding_model, datadir):
         embeddings = []
         filepath = "/n/holylabs/LABS/calmon_lab/Lab/datasets/occupations/"
         embeddings = np.load(os.path.join(filepath, embedding_model, "architect/embeds.npy"))
+        probe_labels = np.load(os.path.join(filepath, embedding_model, "architect/probe_labels.npy"))
         indices = []
         labels = np.zeros((embeddings.shape[0], dataset.labels.shape[1]))
         with open(os.path.join(filepath, embedding_model, "architect/images.txt"), "r") as f:
@@ -33,10 +34,11 @@ def get_top_embeddings_labels_ids(dataset, query, embedding_model, datadir):
                 labels[i] = dataset.labels[idx].numpy()
                 indices.append(idx)
         # labels = dataset.labels.numpy()
-        # indices = torch.arange(embeddings.shape[0])
+        # indices = torch.arange(embeddings.shape[0])        
     else:
         retrievaldir = os.path.join("/n/holylabs/LABS/calmon_lab/Lab/datasets", datadir, embedding_model,query)
         embeddings = np.load(os.path.join(retrievaldir, "embeds.npy"))
+        probe_labels = np.load(os.path.join(retrievaldir, "probe_labels.npy"))
         # embeddings /= np.linalg.norm(embeddings, axis=1)
         labels = np.zeros((embeddings.shape[0], dataset.labels.shape[1]))
         indices = []
@@ -48,7 +50,7 @@ def get_top_embeddings_labels_ids(dataset, query, embedding_model, datadir):
                 labels[i] = dataset.labels[idx].numpy()
                 indices.append(idx)
     
-    return embeddings, labels, indices
+    return embeddings, labels, indices, probe_labels
 
 def main():
     parser = argparse.ArgumentParser()
@@ -120,7 +122,7 @@ def main():
     with open(args.query, 'r') as f:
         queries = f.readlines()
 
-    for query in tqdm(queries):
+    for query in tqdm(queries[::-1]):
         q_org = query.strip()
         q = "A photo of "+ q_org
         q_tag = " ".join(q.split(" ")[4:])
@@ -128,7 +130,7 @@ def main():
         q_emb = np.load("representational_retrieval/queries/{}_{}.npy".format(embedding_model, q_tag))
         # q_token = clip.tokenize(q).to(args.device)
 
-        retrieval_features, retrieval_labels, retrieval_indices = get_top_embeddings_labels_ids(
+        retrieval_features, retrieval_labels, retrieval_indices, retrieval_probe_labels = get_top_embeddings_labels_ids(
             dataset,
             q_tag,
             embedding_model,
@@ -136,26 +138,48 @@ def main():
         )
         
         if curation_dataset is not None:
-            curation_features, curation_labels, curation_indices = get_top_embeddings_labels_ids(
+            curation_features, curation_labels, curation_indices, curation_probe_labels = get_top_embeddings_labels_ids(
                 curation_dataset,
                 q_tag,
                 embedding_model,
                 args.curation_dataset
             )
-            with open('representational_retrieval/shared_labels.json') as f:
-                d = json.load(f)[args.dataset][args.curation_dataset]
-                print("Shared labels for {}, {}:".format(args.dataset, args.curation_dataset))
-                ret_indices = []
-                cur_indices = []
-                for lab in d.keys():
-                    print(lab)
-                    ret_indices.append(d[lab][0]) if isinstance(d[lab][0], int) else ret_indices.extend(d[lab][0])
-                    cur_indices.append(d[lab][1]) if isinstance(d[lab][1], int) else cur_indices.extend(d[lab][1])
-            print(ret_indices)
-            print(cur_indices)
-            curation_labels_full = curation_labels
-            curation_labels = curation_labels[:, cur_indices]
-            retrieval_labels = retrieval_labels[:, ret_indices]
+            # with open('representational_retrieval/shared_labels.json') as f:
+            #     d = json.load(f)[args.dataset][args.curation_dataset]
+            #     print("Shared labels for {}, {}:".format(args.dataset, args.curation_dataset))
+            #     ret_indices = []
+            #     cur_indices = []
+            #     for lab in d.keys():
+            #         print(lab)
+            #         ret_indices.append(d[lab][0]) if isinstance(d[lab][0], int) else ret_indices.extend(d[lab][0])
+            #         cur_indices.append(d[lab][1]) if isinstance(d[lab][1], int) else cur_indices.extend(d[lab][1])
+            # print(ret_indices)
+            # print(cur_indices)
+            # curation_labels_full = curation_labels
+            # curation_labels = curation_labels[:, cur_indices]
+            # retrieval_labels = retrieval_labels[:, ret_indices]
+            if args.dataset == "utkface": ## remap races to utkface
+                new_races = np.zeros((curation_probe_labels.shape[0], 5))
+                new_races[:, 0] = curation_probe_labels[:, 5]
+                new_races[:, 1] = curation_probe_labels[:, 4]
+                new_races[:, 2] = np.logical_or(curation_probe_labels[:, 2], curation_probe_labels[:, 8]) ## Asian, SE Asian
+                new_races[:, 3] = curation_probe_labels[:, 3]
+                new_races[:, 4] = np.logical_or(curation_probe_labels[:, 6], curation_probe_labels[:, 7]) ## Middle Eastern, Latino
+                curation_probe_labels = np.concatenate((curation_probe_labels[:, :2], new_races), axis=1)
+            if args.curation_dataset == "utkface":
+                new_races = np.zeros((retrieval_probe_labels.shape[0], 5))
+                new_races[:, 0] = retrieval_probe_labels[:, 5]
+                new_races[:, 1] = retrieval_probe_labels[:, 4]
+                new_races[:, 2] = np.logical_or(retrieval_probe_labels[:, 2], retrieval_probe_labels[:, 8]) ## Asian, SE Asian
+                new_races[:, 3] = retrieval_probe_labels[:, 3]
+                new_races[:, 4] = np.logical_or(retrieval_probe_labels[:, 6], retrieval_probe_labels[:, 7]) ## Middle Eastern, Latino
+                retrieval_probe_labels = np.concatenate((retrieval_probe_labels[:, :2], new_races), axis=1)
+
+            curation_labels = curation_probe_labels
+            retrieval_labels = retrieval_probe_labels
+            print(curation_labels.shape)
+            print(retrieval_labels.shape)
+            print(retrieval_labels[0])
         else:
             curation_features = None
             curation_labels = None
@@ -191,24 +215,25 @@ def main():
         print(rep_upper_bound == rep_upper_bound_1, "MPR consistent across two calls") 
         print("KNN selection", selection)
         print("mpr for KNN", rep_upper_bound_1)
+        print("sim for KNN", sim_upper_bound)
 
-        random_indices = np.zeros(n)
+        # random_indices = np.zeros(n)
         
-        random_sims = []
-        random_reps = []
-        for _ in range(10):
-            random_selection = np.random.choice(np.arange(n), args.k, replace=False)
-            random_indices[random_selection] = 1
-            random_sim2 = s.T@random_indices
-            random_reps_oracles = []
-            for _ in range(10):
-                random_MPR, _ = getMPR(random_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
-                random_reps_oracles.append(random_MPR)
-            random_reps.append(np.mean(random_reps_oracles))
-            random_sims.append(random_sim2)
-        #print(random_reps)
-        random_rep = np.mean(random_reps)
-        random_sim = np.mean(random_sims)
+        # random_sims = []
+        # random_reps = []
+        # for _ in range(10):
+        #     random_selection = np.random.choice(np.arange(n), args.k, replace=False)
+        #     random_indices[random_selection] = 1
+        #     random_sim2 = s.T@random_indices
+        #     random_reps_oracles = []
+        #     for _ in range(10):
+        #         random_MPR, _ = getMPR(random_indices, retrieval_labels, args.k, curation_set = curation_labels, model=reg_model)
+        #         random_reps_oracles.append(random_MPR)
+        #     random_reps.append(np.mean(random_reps_oracles))
+        #     random_sims.append(random_sim2)
+        # #print(random_reps)
+        # random_rep = np.mean(random_reps)
+        # random_sim = np.mean(random_sims)
         #print("sim_random, rep_random: {}, {}".format(random_sim, random_rep))
 
 
@@ -285,7 +310,9 @@ def main():
                 results['gt_rounded_MPR'] = gt_rounded_reps
             if solver.problem:
                 solver.problem.dispose()
-            del solver
+            if closed_form_solver.problem:
+                closed_form_solver.problem.dispose
+            del solver, closed_form_solver
         elif args.method == "ip":
             solver = GurobiIP(s, retrieval_labels, curation_set=curation_labels, model = reg_model)
 
@@ -322,6 +349,7 @@ def main():
             if args.functionclass != "linearregression":
                 print("linearregression required for closed lp")
                 exit()
+            # cuttingplanesolver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
             solver = BoundedDataNormLP(s, retrieval_labels, curation_labels=curation_labels)
 
             lb, ub = solver.get_lower_upper_bounds(args.k)
@@ -329,8 +357,10 @@ def main():
             num_iter = 50
 
             reps = []
+            cuttingplanereps = []
             sims = []
             rounded_reps = []
+            rounded_cuttingplanereps = []
             rounded_sims = []
             indices_list = []
             rounded_indices_list = []
@@ -342,18 +372,26 @@ def main():
                 indices_rounded[indices_rounded>1e-5] = 1.0 
 
                 rep = solver.getClosedMPR(indices, args.k)
+                cuttingplanerep, c = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                print("norm Xw:", np.linalg.norm(c, axis=0))
                 print("Rep: ", rep)
                 sim = (s.T @ indices)
                 print("Sim: ", sim)
 
+                cuttingplanereps.append(cuttingplanerep)
                 reps.append(rep)
                 sims.append(sim[0])
                 indices_list.append(indices)
 
                 rounded_rep = solver.getClosedMPR(indices_rounded, args.k)
+                rounded_cuttingplanerep, rounded_c = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+
                 print("Rounded Rep", rounded_rep)
+                print("norm Xw:", np.linalg.norm(rounded_c, axis=0))
+
                 rounded_sim = (s.T @ indices_rounded)
 
+                rounded_cuttingplanereps.append(rounded_cuttingplanerep)
                 rounded_reps.append(rounded_rep)
                 rounded_sims.append(rounded_sim[0])
                 rounded_indices_list.append(indices_rounded)
@@ -364,10 +402,12 @@ def main():
             results['rounded_MPR'] = rounded_reps
             results['rounded_sims'] = rounded_sims
             results['rounded_indices'] = rounded_indices_list
+            results['cutting_MPR'] = cuttingplanereps
+            results['rounded_cutting_MPR'] = rounded_cuttingplanereps
             results['rhos'] = rhos
             del solver
         elif args.method == "mmr":
-            solver = MMR(s, retrieval_features, curation_embeddings=curation_features)
+            solver = MMR(s, retrieval_features)
             lambdas = np.linspace(0, 1-1e-5, 50)
 
             reps = []
@@ -522,7 +562,7 @@ def main():
             results['indices'] = indices_list
             results['lambdas'] = lambdas #control amt of intervention. eps = .5 means half the time you take a PBM step, half the time you take a greedy one
             results['selection'] = selection_list
-        result_path = 'results/0510/'
+        result_path = '/n/holyscratch01/calmon_lab/Users/aoesterling/representational_retrieval/final_results/'
         q_title = q.split(" ")[-1]
         print("MPR: ", results['MPR'])
         print("sims: ", results['sims'])
@@ -531,9 +571,10 @@ def main():
         else:
             filename_pkl = "{}_curation_{}_top10k_{}_{}_{}_{}.pkl".format(args.dataset, args.curation_dataset, args.method, args.k, args.functionclass, q_title)
         print(filename_pkl)
+        print(result_path+filename_pkl)
         if not os.path.exists(result_path):
             os.makedirs(result_path)
-        with open(result_path + filename_pkl, 'wb') as f:
+        with open(os.path.join(result_path,filename_pkl), 'wb') as f:
             pickle.dump(results, f)
 
     print(args)
