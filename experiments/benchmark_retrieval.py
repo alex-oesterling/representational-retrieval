@@ -251,6 +251,8 @@ def main():
 
             reps = []
             sims = []
+            reps.append(rep_upper_bound)
+            sims.append(sim_upper_bound)
             rounded_reps = []
             rounded_sims = []
             indices_list = []
