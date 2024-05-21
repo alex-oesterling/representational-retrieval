@@ -18,6 +18,14 @@ import os
 import debias_clip as dclip
 import json
 
+def argmax_probe_labels(probe_embeds):
+    age_vec = (probe_embeds[:, 1] > 0.5).astype(np.int64)
+    race_vec = probe_embeds[:, 2:]
+    race_argmax = np.argmax(race_vec, axis=1)
+    race_onehot = np.zeros((race_argmax.size, probe_embeds.shape[1]-2))
+    race_onehot[np.arange(race_argmax.size), race_argmax] = 1
+    return np.concatenate((probe_embeds[:, 0].reshape(-1, 1), age_vec.reshape(-1,1), race_onehot), axis=1)
+
 def get_top_embeddings_labels_ids(dataset, query, embedding_model, datadir):
     if datadir == "occupations": ## Occupations is so small no need to use all 10k
         embeddings = []
@@ -114,7 +122,7 @@ def main():
     elif args.functionclass == "decisiontree":
         reg_model = DecisionTreeRegressor(max_depth=3, random_state=1017)
     elif args.functionclass == "mlp":
-        reg_model = MLPRegressor([64, 64], random_state=1017)
+        reg_model = MLPRegressor([64], random_state=1017)
     else:
         print("Function class not supported.")
         exit()
@@ -122,7 +130,7 @@ def main():
     with open(args.query, 'r') as f:
         queries = f.readlines()
 
-    for query in tqdm(queries[::-1]):
+    for query in tqdm(queries):
         q_org = query.strip()
         q = "A photo of "+ q_org
         q_tag = " ".join(q.split(" ")[4:])
@@ -136,6 +144,9 @@ def main():
             embedding_model,
             args.dataset
         )
+        retrieval_features = retrieval_features.astype(np.float32)
+
+        retrieval_probe_labels = argmax_probe_labels(retrieval_probe_labels)
         
         if curation_dataset is not None:
             curation_features, curation_labels, curation_indices, curation_probe_labels = get_top_embeddings_labels_ids(
@@ -144,6 +155,9 @@ def main():
                 embedding_model,
                 args.curation_dataset
             )
+            curation_features = curation_features.astype(np.float32)
+            curation_probe_labels = argmax_probe_labels(curation_probe_labels)
+
             # with open('representational_retrieval/shared_labels.json') as f:
             #     d = json.load(f)[args.dataset][args.curation_dataset]
             #     print("Shared labels for {}, {}:".format(args.dataset, args.curation_dataset))
@@ -155,9 +169,10 @@ def main():
             #         cur_indices.append(d[lab][1]) if isinstance(d[lab][1], int) else cur_indices.extend(d[lab][1])
             # print(ret_indices)
             # print(cur_indices)
-            # curation_labels_full = curation_labels
             # curation_labels = curation_labels[:, cur_indices]
             # retrieval_labels = retrieval_labels[:, ret_indices]
+            curation_labels_full = curation_labels
+
             if args.dataset == "utkface": ## remap races to utkface
                 new_races = np.zeros((curation_probe_labels.shape[0], 5))
                 new_races[:, 0] = curation_probe_labels[:, 5]
@@ -175,11 +190,19 @@ def main():
                 new_races[:, 4] = np.logical_or(retrieval_probe_labels[:, 6], retrieval_probe_labels[:, 7]) ## Middle Eastern, Latino
                 retrieval_probe_labels = np.concatenate((retrieval_probe_labels[:, :2], new_races), axis=1)
 
+            # synthetic_curation_probe_labels = None
+            # num_races = curation_probe_labels.shape[1]-2
+            # for i in range(2):
+            #     for j in range(2):
+            #         temp = np.concatenate([np.ones((num_races, 1))*i,np.ones((num_races, 1))*j,np.eye(num_races)], axis=1)
+            #         if synthetic_curation_probe_labels is None:
+            #             synthetic_curation_probe_labels = temp
+            #         else:
+            #             synthetic_curation_probe_labels = np.concatenate([synthetic_curation_probe_labels, temp], axis=0)
+
+            # curation_labels = synthetic_curation_probe_labels
             curation_labels = curation_probe_labels
             retrieval_labels = retrieval_probe_labels
-            print(curation_labels.shape)
-            print(retrieval_labels.shape)
-            print(retrieval_labels[0])
         else:
             curation_features = None
             curation_labels = None
@@ -243,20 +266,18 @@ def main():
 
         if args.method == "lp":
             solver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
-            if args.functionclass == "linearregression":
-                closed_form_solver = BoundedDataNormLP(s, retrieval_labels, curation_labels=curation_labels)
-                gt_reps = []
-                gt_rounded_reps = []
+            # if args.functionclass == "linearregression":
+            #     closed_form_solver = BoundedDataNormLP(s, retrieval_labels, curation_labels=curation_labels)
+            #     gt_reps = []
+            #     gt_rounded_reps = []
             num_iter = 50
 
             reps = []
             sims = []
-            reps.append(rep_upper_bound)
-            sims.append(sim_upper_bound)
-            rounded_reps = []
-            rounded_sims = []
+            # rounded_reps = []
+            # rounded_sims = []
             indices_list = []
-            rounded_indices_list = []
+            # rounded_indices_list = []
             # lb, ub = get_lower_upper_bounds(args.k, s, retrieval_labels, curation_labels)
             #rhos = [rep_upper_bound]
             rhos = np.linspace(0.005, rep_upper_bound+1e-5, 50)
@@ -265,7 +286,7 @@ def main():
 
             # rhos = np.linspace(lb, ub, 40)[::-1]
             for rho in tqdm(rhos, desc="rhos"):
-                indices = solver.fit(args.k, num_iter, rho, KNN_indices = top_indices)
+                indices = solver.fit(args.k, num_iter, rho, top_indices)
                 if indices is None: ## returns none if problem is infeasible
                     continue
                 
@@ -280,41 +301,114 @@ def main():
                 print("Rep: ", rep)
                 sim = (s.T @ indices)
                 print("Sim: ", sim)
-                if args.functionclass == "linearregression":
-                    gt_rep = closed_form_solver.getClosedMPR(indices, args.k)
-                    gt_reps.append(gt_rep)
+                # if args.functionclass == "linearregression":
+                #     gt_rep = closed_form_solver.getClosedMPR(indices, args.k)
+                #     gt_reps.append(gt_rep)
 
                 reps.append(rep)
                 sims.append(sim[0])
                 indices_list.append(indices)
+                # if args.functionclass == "linearregression":
+                #     gt_rounded_rep = closed_form_solver.getClosedMPR(indices_rounded, args.k)
+                #     gt_rounded_reps.append(gt_rounded_rep)
 
-                rounded_rep, _ = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
-                print("Rounded Rep", rounded_rep)
-                if args.functionclass == "linearregression":
-                    gt_rounded_rep = closed_form_solver.getClosedMPR(indices_rounded, args.k)
-                    gt_rounded_reps.append(gt_rounded_rep)
+                # rounded_rep = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+                # print("Rounded Rep", rounded_rep)
+                # rounded_sim = (s.T @ indices_rounded)
 
-                rounded_sim = (s.T @ indices_rounded)
-
-                rounded_reps.append(rounded_rep)
-                rounded_sims.append(rounded_sim[0])
-                rounded_indices_list.append(indices_rounded)
+                # rounded_reps.append(rounded_rep)
+                # rounded_sims.append(rounded_sim[0])
+                # rounded_indices_list.append(indices_rounded)
 
             results['MPR'] = reps
             results['sims'] = sims
             results['indices'] = indices_list
-            results['rounded_MPR'] = rounded_reps
-            results['rounded_sims'] = rounded_sims
-            results['rounded_indices'] = rounded_indices_list
-            results['rhos'] = rhos
-            if args.functionclass == "linearregression":
-                results['gt_MPR'] = gt_reps
-                results['gt_rounded_MPR'] = gt_rounded_reps
+            # results['rounded_MPR'] = rounded_reps
+            # results['rounded_sims'] = rounded_sims
+            # results['rounded_indices'] = rounded_indices_list
+            # results['rhos'] = rhos
+            # if args.functionclass == "linearregression":
+            #     results['gt_MPR'] = gt_reps
+            #     results['gt_rounded_MPR'] = gt_rounded_reps
             if solver.problem:
                 solver.problem.dispose()
-            if closed_form_solver.problem:
-                closed_form_solver.problem.dispose
-            del solver, closed_form_solver
+            del solver
+            # solver = GurobiLP(s, retrieval_labels, curation_set=curation_labels, model=reg_model)
+            # # if args.functionclass == "linearregression":
+            # #     closed_form_solver = BoundedDataNormLP(s, retrieval_labels, curation_labels=curation_labels)
+            # #     gt_reps = []
+            # #     gt_rounded_reps = []
+            # num_iter = 50
+
+            # reps = []
+            # sims = []
+            # reps.append(rep_upper_bound)
+            # sims.append(sim_upper_bound.item())
+            # rounded_reps = []
+            # rounded_sims = []
+            # indices_list = []
+            # rounded_indices_list = []
+            # # lb, ub = get_lower_upper_bounds(args.k, s, retrieval_labels, curation_labels)
+            # #rhos = [rep_upper_bound]
+            # rhos = np.linspace(0.005, rep_upper_bound+1e-5, 50)
+            # #rhos = np.linspace(random_rep, rep_upper_bound, 50)
+            # # rhos = np.linspace(0.005, 0.025, 20)
+
+            # # rhos = np.linspace(lb, ub, 40)[::-1]
+            # for rho in tqdm(rhos, desc="rhos"):
+            #     indices = solver.fit(args.k, num_iter, rho, KNN_indices = top_indices)
+            #     if indices is None: ## returns none if problem is infeasible
+            #         continue
+                
+            #     indices_rounded = indices.copy()
+            #     indices_rounded[np.argsort(indices_rounded)[::-1][args.k:]] = 0
+            #     indices_rounded[indices_rounded>1e-5] = 1.0 
+            #     # print(np.where(indices_rounded==1)[0])
+            #     # print(np.where(top_indices==1)[0])
+            #     # assert (indices_rounded == top_indices).all(), f"Not starting from KNN indices"
+
+            #     rep, _ = getMPR(indices, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+            #     print("Rep: ", rep)
+            #     sim = (s.T @ indices)
+            #     print("Sim: ", sim)
+            #     # if args.functionclass == "linearregression":
+            #     #     gt_rep = closed_form_solver.getClosedMPR(indices, args.k)
+            #     #     gt_reps.append(gt_rep)
+
+            #     reps.append(rep)
+            #     sims.append(sim[0])
+            #     indices_list.append(indices)
+
+            #     rounded_rep, _ = getMPR(indices_rounded, retrieval_labels, args.k, curation_set=curation_labels, model=reg_model)
+            #     print("Rounded Rep", rounded_rep)
+            #     # if args.functionclass == "linearregression":
+            #     #     gt_rounded_rep = closed_form_solver.getClosedMPR(indices_rounded, args.k)
+            #     #     gt_rounded_reps.append(gt_rounded_rep)
+
+            #     rounded_sim = (s.T @ indices_rounded)
+
+            #     rounded_reps.append(rounded_rep)
+            #     rounded_sims.append(rounded_sim[0])
+            #     rounded_indices_list.append(indices_rounded)
+            #     if solver.problem:
+            #         solver.problem.dispose()
+
+            # results['MPR'] = reps
+            # results['sims'] = sims
+            # results['indices'] = indices_list
+            # results['rounded_MPR'] = rounded_reps
+            # results['rounded_sims'] = rounded_sims
+            # results['rounded_indices'] = rounded_indices_list
+            # results['rhos'] = rhos
+            # # if args.functionclass == "linearregression":
+            # #     results['gt_MPR'] = gt_reps
+            # #     results['gt_rounded_MPR'] = gt_rounded_reps
+            # if solver.problem:
+            #     solver.problem.dispose()
+            # # if closed_form_solver.problem:
+            # #     closed_form_solver.problem.dispose()
+            # del solver
+            # # del closed_form_solver
         elif args.method == "ip":
             solver = GurobiIP(s, retrieval_labels, curation_set=curation_labels, model = reg_model)
 
@@ -410,6 +504,7 @@ def main():
             del solver
         elif args.method == "mmr":
             solver = MMR(s, retrieval_features)
+            # solver = MMR(s, retrieval_labels)
             lambdas = np.linspace(0, 1-1e-5, 50)
 
             reps = []
@@ -484,15 +579,7 @@ def main():
         elif args.method == "clipclip":
             # get the order of columns to drop to reduce MI with sensitive attributes (support intersectional groups)
             if curation_dataset is not None:
-                if args.dataset == "occupations":
-                    gender_idx = 0
-                elif args.dataset == "celeba":
-                    gender_idx = 20
-                elif args.dataset == "fairface":
-                    gender_idx = 0
-                elif args.dataset == "utkface":
-                    gender_idx = 0
-                gender_MI_order = return_feature_MI_order(curation_features, curation_labels_full, [gender_idx])
+                gender_MI_order = return_feature_MI_order(curation_features, curation_labels_full, [0])
             else:
                 if args.dataset == "occupations":
                     gender_idx = 0

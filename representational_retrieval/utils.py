@@ -55,6 +55,7 @@ def statEmbedding(embeddings):
     distances = []
     for i in range(len(embeddings)):
         for j in range(i+1, len(embeddings)):
+            # print(embeddings[i], embeddings[j])
             distance = np.linalg.norm(embeddings[i] - embeddings[j])
             distances.append(distance)
     distances = np.array(distances)

@@ -426,6 +426,7 @@ class GurobiLP():
             return KNN_indices
         
         self.problem = gp.Model("mixed_integer_optimization")
+        self.problem.params.SoftMemLimit = 16
         self.a = self.problem.addVars(self.n, lb=0, ub=1, vtype=GRB.CONTINUOUS, name="a")
         obj = gp.quicksum(self.similarity_scores[i]*self.a[i] for i in range(self.n))
         self.problem.setObjective(obj, sense=GRB.MAXIMIZE)
