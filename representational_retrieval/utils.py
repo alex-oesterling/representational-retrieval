@@ -29,7 +29,8 @@ def getMPR(indices, dataset, k, curation_set=None, model=None):
         m = curation_set.shape[0]
         c = reg.predict(expanded_dataset)
         c /= np.linalg.norm(c)
-        c *= np.sqrt(c.shape[0]) ## sqrt(n+m) = 141
+#        c *= np.sqrt(c.shape[0]) ## sqrt(n+m) = 141
+        c *= np.sqrt(m*k/(m+k))
         mpr = np.abs(np.sum((indices/k)*c[:dataset.shape[0]]) - np.sum((1/m)*c[dataset.shape[0]:]))
     else:
         m = dataset.shape[0]
